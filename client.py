@@ -134,6 +134,8 @@ class Proposer:
     majority = math.ceil(len(config)/2.0)
     log_status = {}     ## { 0 : "ballot_number":n, "value":val, "accept_count":n }
 
+    #NOTE: unchosen index will have to be searched for in the log in case of leader failures
+
 
     def send_accept_msg(self, value):
         msg = { "message_type" : "ACCEPT-REQUEST", "ballot_number" : (Proposer.ballot_number, process_id), "log_index" : Proposer.unchosen_index, "value" : value, "sender_id" : process_id }
@@ -158,7 +160,7 @@ class Proposer:
         ballot_number = Proposer.log_status[log_index]["ballot_number"]
         value = Proposer.log_status[log_index]["value"]
         Proposer.log[log_index] = value
-        msg = { "message_type" : "accept-accept", "ballot_number" : (ballot_number, process_id), "log_index" : log_index, "value" : value, "sender_id" : process_id }
+        msg = { "message_type": "ACCEPT-ACCEPT", "ballot_number": (ballot_number, process_id), "log_index": log_index, "value": value, "sender_id": process_id }
         broadcast_msg(msg)
 
 

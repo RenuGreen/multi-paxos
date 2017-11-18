@@ -95,8 +95,10 @@ def receive_message():
                         continue
                     msg = json.loads(msg)
                     print msg
-                    # msg_type = msg["message_type"]
-
+                    msg_type = msg["message_type"]
+                    if(msg_type == "accept-accept"):
+                        #receive ack
+                        pass
 
 
             except:
@@ -113,19 +115,40 @@ def broadcast_msg(msg):
             message_queue_lock.release()
 
 class Proposer:
+    ballot_number = 0
+    unchosen_index = 0
+    log = {}    # { log_index : value }
     majority = math.ceil(len(config)/2.0)
-    log_status = {}     #key: log_index, value: number of acks received
-    ballot_number_mapping = {}      #key: log_index, value: ballot_number
+    log_status = {}     ## { 0 : "ballot_number":n, "value":val, "accept_count":n }
 
 
-    def send_accept_msg(self, ballot_number, log_index, value):
-        msg = { "message_type" : "accept-request", "ballot_number" : ballot_number, "log_index" : log_index, "value" : value, "sender_id" : process_id }
+    def send_accept_msg(self, value):
+        msg = { "message_type" : "accept-request", "ballot_number" : (Proposer.ballot_number, process_id), "log_index" : Proposer.unchosen_index, "value" : value, "sender_id" : process_id }
+        Proposer.log_status[Proposer.unchosen_index] = { "ballot_number" : Proposer.ballot_number, "value" : value }
+        Proposer.ballot_number += 1
+        Proposer.unchosen_index += 1
         broadcast_msg(msg)
 
     def receive_ack(self, msg):
+        log_index = msg["log_index"]
+        if Proposer.log_status[log_index]["accept_count"]:
+            Proposer.log_status[log_index]["accept_count"] = 1
+        else:
+            Proposer.log_status[log_index]["accept_count"] += 1
+        self.check_log_status(log_index)
 
-    # def check_log_status(self, log_index):
-        # if self.log_status[log_index]
+    def check_log_status(self, log_index):
+        if Proposer.log_status[log_index]["accept_count"] >= Proposer.majority:
+            self.send_final_accept(log_index)
+
+    def send_final_accept(self, log_index):
+        ballot_number = Proposer.log_status[log_index]["ballot_number"]
+        value = Proposer.log_status[log_index]["value"]
+        Proposer.log[log_index] = value
+        msg = { "message_type" : "accept-accept", "ballot_number" : (ballot_number, process_id), "log_index" : log_index, "value" : value, "sender_id" : process_id }
+        broadcast_msg(msg)
+
+
 
 
 

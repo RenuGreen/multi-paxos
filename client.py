@@ -128,11 +128,21 @@ def broadcast_msg(msg):
             message_queue_lock.release()
 
 class Proposer:
+
+    ## Phase I
+    # Proposer -> prepare
+    # Acceptor -> accept-prepare
+    ## Phase II
+    # Proposer -> accept
+    # Acceptor -> accept-accept
+    # Proposer -> commit
+
     ballot_number = 0
     unchosen_index = 0
     log = {}    # { log_index : value }
     majority = math.ceil(len(config)/2.0)
-    log_status = {}     ## { 0 : "ballot_number":n, "value":val, "accept_count":n }
+    log_status = {}     ## { 0 : "ballot_number":n, "value":val, "prepare_count":n, "accept_count":n }
+
 
     #NOTE: unchosen index will have to be searched for in the log in case of leader failures
 
@@ -140,7 +150,29 @@ class Proposer:
         msg = {"message_type": "PREPARE", "ballot_number": (Proposer.ballot_number, process_id),
                "log_index": Proposer.unchosen_index, "value": value, "sender_id": process_id}
 
+    def receive_accept_prepare(self, msg):
+        log_index = msg["log_index"]
+        accept_num = msg["accept_num"]
+        accept_val = msg["accept_val"]
+        if log_index in Proposer.ballot_status:
+            old_accept_num = Proposer.ballot_status[log_index]["accept_num"]
+            if accept_num > old_accept_num:
+                Proposer.ballot_status[log_index]["accept_num"] = accept_num
+                Proposer.ballot_status[log_index]["accept_val"] = accept_val
+        else:
+            Proposer.ballot_status[log_index] = { "accept_num": accept_num, "accept_val":accept_val }
 
+        if "prepare_count" in Proposer.log_status[log_index]:
+            Proposer.log_status[log_index]["prepare_count"] = 1
+        else:
+            Proposer.log_status[log_index]["prepare_count"] += 1
+        self.check_prepare_status(log_index)
+
+    def check_preare_status(self, log_index):
+        if Proposer.log_status[log_index]["accept_count"] >= Proposer.majority:
+            value = Proposer.ballot_status[log_index]["accept_val"]
+            Proposer.log_status[log_index]["value"] = value
+            self.send_accept_msg(value)
 
     def send_accept_msg(self, value):
         msg = { "message_type" : "ACCEPT", "ballot_number" : (Proposer.ballot_number, process_id), "log_index" : Proposer.unchosen_index, "value" : value, "sender_id" : process_id }
@@ -167,7 +199,6 @@ class Proposer:
         Proposer.log[log_index] = value
         msg = { "message_type": "COMMIT", "ballot_number": (ballot_number, process_id), "log_index": log_index, "value": value, "sender_id": process_id }
         broadcast_msg(msg)
-
 
 
 

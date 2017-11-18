@@ -138,15 +138,19 @@ class Proposer:
 
     def send_prepare(self):
         msg = {"message_type": "PREPARE", "ballot_number": (Proposer.ballot_number, process_id),
-               "log_index": Proposer.unchosen_index, "value": value, "sender_id": process_id}
-
-
-
-    def send_accept_msg(self, value):
-        msg = { "message_type" : "ACCEPT", "ballot_number" : (Proposer.ballot_number, process_id), "log_index" : Proposer.unchosen_index, "value" : value, "sender_id" : process_id }
-        Proposer.log_status[Proposer.unchosen_index] = { "ballot_number" : Proposer.ballot_number, "value" : value }
+               "log_index": Proposer.unchosen_index, "sender_id": process_id}
         Proposer.ballot_number += 1
         Proposer.unchosen_index += 1
+        broadcast_msg(msg)
+
+    #Added flag when phase 1 runs as well to not increment twice
+
+    def send_accept_msg(self, value, flag = True):
+        msg = { "message_type" : "ACCEPT", "ballot_number" : (Proposer.ballot_number, process_id), "log_index" : Proposer.unchosen_index, "value" : value, "sender_id" : process_id }
+        Proposer.log_status[Proposer.unchosen_index] = { "ballot_number" : Proposer.ballot_number, "value" : value }
+        if flag:
+            Proposer.ballot_number += 1
+            Proposer.unchosen_index += 1
         broadcast_msg(msg)
 
     def receive_ack(self, msg):

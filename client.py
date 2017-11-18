@@ -7,6 +7,7 @@ import Queue
 import traceback, random
 import re
 import logging
+import math
 
 logging.basicConfig(level = logging.INFO)
 
@@ -93,13 +94,42 @@ def receive_message():
                     if msg == '\n' or msg == '' or msg is None:
                         continue
                     msg = json.loads(msg)
-                    msg_type = msg["message_type"]
+                    print msg
+                    # msg_type = msg["message_type"]
 
 
 
             except:
                 time.sleep(1)
                 continue
+
+def broadcast_msg(msg):
+    for i in config:
+        if i != process_id:
+            message_copy = dict(message)
+            message_copy['receiver_id'] = str(i)
+            message_queue_lock.acquire()
+            message_queue.put(message_copy)
+            message_queue_lock.release()
+
+class Proposer:
+    majority = math.ceil(len(config)/2.0)
+    log_status = {}     #key: log_index, value: number of acks received
+    ballot_number_mapping = {}      #key: log_index, value: ballot_number
+
+
+    def send_accept_msg(self, ballot_number, log_index, value):
+        msg = { "message_type" : "accept-request", "ballot_number" : ballot_number, "log_index" : log_index, "value" : value, "sender_id" : process_id }
+        broadcast_msg(msg)
+
+    def receive_ack(self, msg):
+
+    # def check_log_status(self, log_index):
+        # if self.log_status[log_index]
+
+
+
+
 
 
 ################################################################################
@@ -108,7 +138,7 @@ def receive_message():
 with open("config.json", "r") as configFile:
     config = json.load(configFile)
 
-process_id = raw_input()
+process_id = raw_input("Enter process id: ")
 
 HOST = ''
 PORT = config[process_id]
@@ -122,9 +152,11 @@ start_new_thread(setup_receive_channels, (s,))
 t1 = threading.Thread(target=setup_send_channels, args=())
 t1.start()
 # wait till all send connections have been set up
-t1.join()
+# t1.join()
 start_new_thread(send_message, ())
 start_new_thread(receive_message, ())
+
+
 
 
 while True:

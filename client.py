@@ -23,6 +23,19 @@ class Acceptor:
     manage_log = {}
     manage_ballot = {}
 
+    def receive_prepare(self, message):
+
+        log_index = message['log_index']
+        if log_index not in Acceptor.manage_ballot:
+            Acceptor.manage_ballot[log_index] = {'ballot_number': 0}
+        if log_index not in Acceptor.manage_log:
+            Acceptor.manage_log[log_index] = {'accept_num': 0, 'accept_val' : 0}
+        if message['ballot_number'] >= Acceptor.manage_ballot[log_index]['ballot_num']:
+            Acceptor.manage_ballot[log_index] = {'ballot_number': message['ballot_number']}
+            message = {"message_type": "ACCEPT-PREPARE", "ballot_number": message['ballot_number'], "accept_num": Acceptor.manage_log[log_index]['accept_num'], "accept_val" : Acceptor.manage_log[log_index]['accept_val'], "receiver_id": Acceptor.leader_id, "sender_id": process_id}
+            send_message(message)
+
+
     def receive_accept(self, message):
 
         log_index = message['log_index']
@@ -119,7 +132,7 @@ class Proposer:
 
 
     def send_accept_msg(self, ballot_number, log_index, value):
-        msg = { "message_type" : "accept-request", "ballot_number" : ballot_number, "log_index" : log_index, "value" : value, "sender_id" : process_id }
+        msg = { "message_type" : "ACCEPT-REQUEST", "ballot_number" : ballot_number, "log_index" : log_index, "value" : value, "sender_id" : process_id }
         broadcast_msg(msg)
 
     def receive_ack(self, msg):

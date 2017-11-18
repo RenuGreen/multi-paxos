@@ -16,7 +16,35 @@ message_queue = Queue.Queue()
 lock=threading.Lock()
 message_queue_lock = threading.Lock()
 
-def setup_receive_channels(s): 
+class Acceptor:
+    log = {}
+    leader_id = 1
+    manage_log = {}
+    manage_ballot = {}
+
+    def receive_accept(self, message):
+
+        log_index = message['log_index']
+        if log_index not in Acceptor.manage_log:
+            Acceptor.manage_log[log_index] = {'accept_num': 0, 'accept_val' : 0}
+        if log_index not in Acceptor.manage_ballot:
+            Acceptor.manage_ballot[log_index] = {'ballot_number': 0}
+        if message['ballot_number'] >= Acceptor.manage_ballot[log_index]['ballot_num']:
+            Acceptor.manage_log[log_index]['accept_num'] = message['ballot_number']
+            Acceptor.manage_log[log_index]['accept_val'] = message['value']
+            Acceptor.manage_ballot[log_index]['ballot_num'] = message['ballot_number']
+            message = {"message_type": "ACCEPT-ACCEPT", "ballot_number" : message['ballot_number'], "value" : message['value'], "receiver_id" : Acceptor.leader_id, "sender_id": process_id}
+            send_message(message)
+
+
+    def receive_final_value(self):
+
+        Acceptor.log[message['log_index']] = message["value"]
+
+
+
+
+def setup_receive_channels(s):
     while 1:
         try:
             conn, addr = s.accept()

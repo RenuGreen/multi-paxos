@@ -136,13 +136,19 @@ class Proposer:
 
     #NOTE: unchosen index will have to be searched for in the log in case of leader failures
 
-
-    def send_accept_msg(self, value):
-        msg = { "message_type" : "ACCEPT-REQUEST", "ballot_number" : (Proposer.ballot_number, process_id), "log_index" : Proposer.unchosen_index, "value" : value, "sender_id" : process_id }
-        Proposer.log_status[Proposer.unchosen_index] = { "ballot_number" : Proposer.ballot_number, "value" : value }
+    def send_prepare(self):
+        msg = {"message_type": "PREPARE", "ballot_number": (Proposer.ballot_number, process_id),
+               "log_index": Proposer.unchosen_index, "value": value, "sender_id": process_id}
+        Proposer.log_status[Proposer.unchosen_index] = {"ballot_number": Proposer.ballot_number, "value": value}
         Proposer.ballot_number += 1
         Proposer.unchosen_index += 1
         broadcast_msg(msg)
+
+
+
+    def send_accept_msg(self, value):
+        msg = { "message_type" : "ACCEPT", "ballot_number" : (Proposer.ballot_number, process_id), "log_index" : Proposer.unchosen_index, "value" : value, "sender_id" : process_id }
+    
 
     def receive_ack(self, msg):
         log_index = msg["log_index"]
@@ -160,7 +166,7 @@ class Proposer:
         ballot_number = Proposer.log_status[log_index]["ballot_number"]
         value = Proposer.log_status[log_index]["value"]
         Proposer.log[log_index] = value
-        msg = { "message_type": "ACCEPT-ACCEPT", "ballot_number": (ballot_number, process_id), "log_index": log_index, "value": value, "sender_id": process_id }
+        msg = { "message_type": "COMMIT", "ballot_number": (ballot_number, process_id), "log_index": log_index, "value": value, "sender_id": process_id }
         broadcast_msg(msg)
 
 

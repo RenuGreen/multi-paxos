@@ -9,17 +9,22 @@ import re
 import logging
 import math
 
+with open("config.json", "r") as configFile:
+    config = json.load(configFile)
+
 logging.basicConfig(level = logging.INFO)
 
+leader_id = 1
 send_channels = {}
 recv_channels = []
 message_queue = Queue.Queue()
 lock=threading.Lock()
 message_queue_lock = threading.Lock()
+request_queue = []
+request_queue_lock = threading.Lock()
 
 class Acceptor:
     log = {}
-    leader_id = 1
     manage_log = {}
     manage_ballot = {}
 
@@ -74,8 +79,8 @@ def setup_send_channels():
         for i in config.keys():
             if not i == process_id and not i in send_channels.keys():
                 cs = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                host = '127.0.0.1'
-                port = config[i]
+                host = config[i]["IP"]
+                port = config[i]["Port"]
                 try:
                     cs.connect((host, port))
                 except:
@@ -109,14 +114,32 @@ def receive_message():
                     msg = json.loads(msg)
                     print msg
                     msg_type = msg["message_type"]
-                    if(msg_type == "accept-accept"):
-                        #receive ack
-                        pass
-
-
+                    if msg_type == "buy":
+                        if int(process_id) == leader_id:
+                            request_queue_lock.acquire()
+                            request_queue.append(formatted_msg)
+                            request_queue_lock.release()
+                            proposer.send_prepare()
+                        else:
+                            msg["receiver_id"] = leader_id
+                            message_queue_lock.acquire()
+                            message_queue.put(msg)
+                            message_queue_lock.release()
             except:
                 time.sleep(1)
                 continue
+
+# remove this method once the clients are set up
+def handle_request(msg):
+    msg_type = msg["message_type"]
+    if msg_type == "buy":
+        if int(process_id) == leader_id:
+            proposer.send_prepare(msg)
+        else:
+            msg["receiver_id"] = leader_id
+            message_queue_lock.acquire()
+            message_queue.put(msg)
+            message_queue_lock.release()
 
 def broadcast_msg(msg):
     for i in config:
@@ -177,7 +200,7 @@ class Proposer:
             value = Proposer.ballot_status[log_index]["accept_val"]
             Proposer.log_status[log_index]["value"] = value
             self.send_accept_msg(value)
-            
+
     #Added flag when phase 1 runs as well to not increment twice
 
     def send_accept_msg(self, value, flag = True):
@@ -208,39 +231,38 @@ class Proposer:
         broadcast_msg(msg)
 
 
-
-
-
-
-
 ################################################################################
+if __name__ == "__main__":
 
+    process_id = raw_input("Enter process id: ")
 
-with open("config.json", "r") as configFile:
-    config = json.load(configFile)
+    HOST = config[process_id]["IP"]
+    PORT = config[process_id]["Port"]
+    print PORT
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    s.setblocking(0)
+    s.bind((HOST, PORT))
+    s.listen(10)
 
-process_id = raw_input("Enter process id: ")
+    start_new_thread(setup_receive_channels, (s,))
+    start_new_thread(setup_send_channels, ())
+    # t1 = threading.Thread(target=setup_send_channels, args=())
+    # t1.start()
+    start_new_thread(send_message, ())
+    start_new_thread(receive_message, ())
 
-HOST = ''
-PORT = config[process_id]
-s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-s.setblocking(0)
-s.bind((HOST, PORT))
-s.listen(10)
-
-start_new_thread(setup_receive_channels, (s,))
-t1 = threading.Thread(target=setup_send_channels, args=())
-t1.start()
-# wait till all send connections have been set up
-# t1.join()
-start_new_thread(send_message, ())
-start_new_thread(receive_message, ())
-
-
+    proposer = Proposer()
+    acceptor = Acceptor()
 
 
 while True:
-    message = raw_input("Enter SNAPSHOT: ")
-    if message == "SNAPSHOT":
-        print ''
+    message = raw_input("Enter BUY:<no_of_tickets> ")
+    if "BUY" in message:
+        number_of_tickets = message.split(":")[1]
+        if len(number_of_tickets) > 0:
+            number_of_tickets = int(number_of_tickets)
+            formatted_msg = { "message_type": "buy", "number_of_tickets" : number_of_tickets }
+            handle_request(formatted_msg)
+
+

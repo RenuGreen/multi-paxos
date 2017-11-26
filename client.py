@@ -14,7 +14,7 @@ with open("config.json", "r") as configFile:
 
 logging.basicConfig(level = logging.INFO)
 
-leader_id = 1
+leader_id = "1"  #everything is a string (leader_id, process_id, etc.)
 send_channels = {}
 recv_channels = []
 message_queue = Queue.Queue()
@@ -29,16 +29,15 @@ class Acceptor:
     manage_ballot = {}
 
     def receive_prepare(self, message):
-
         log_index = message['log_index']
         if log_index not in Acceptor.manage_ballot:
             Acceptor.manage_ballot[log_index] = {'ballot_number': 0}
         if log_index not in Acceptor.manage_log:
             Acceptor.manage_log[log_index] = {'accept_num': 0, 'accept_val' : 0}
-        if message['ballot_number'] >= Acceptor.manage_ballot[log_index]['ballot_num']:
+        if message['ballot_number'][0] >= Acceptor.manage_ballot[log_index]['ballot_number']:
             Acceptor.manage_ballot[log_index] = {'ballot_number': message['ballot_number']}
-            message = {"message_type": "ACCEPT-PREPARE", "ballot_number": message['ballot_number'], "accept_num": Acceptor.manage_log[log_index]['accept_num'], "accept_val" : Acceptor.manage_log[log_index]['accept_val'], "receiver_id": Acceptor.leader_id, "sender_id": process_id}
-            send_message(message)
+            message = {"message_type": "ACCEPT-PREPARE", "ballot_number": message['ballot_number'], "accept_num": Acceptor.manage_log[log_index]['accept_num'], "accept_val" : Acceptor.manage_log[log_index]['accept_val'], "receiver_id": leader_id, "sender_id": process_id, "log_index":log_index}
+            message_queue.put(message)
 
 
     def receive_accept(self, message):
@@ -114,10 +113,10 @@ def receive_message():
                     msg = json.loads(msg)
                     print msg
                     msg_type = msg["message_type"]
-                    if msg_type == "buy":
-                        if int(process_id) == leader_id:
+                    if msg_type == "BUY":
+                        if process_id == leader_id:
                             request_queue_lock.acquire()
-                            request_queue.append(formatted_msg)
+                            request_queue.append(msg)
                             request_queue_lock.release()
                             proposer.send_prepare()
                         else:
@@ -125,6 +124,11 @@ def receive_message():
                             message_queue_lock.acquire()
                             message_queue.put(msg)
                             message_queue_lock.release()
+                    elif msg_type == "PREPARE":
+                        acceptor.receive_prepare(msg)
+                    elif msg_type == "ACCEPT-PREPARE":
+                        proposer.receive_accept_prepare(msg)
+
             except:
                 time.sleep(1)
                 continue
@@ -132,8 +136,8 @@ def receive_message():
 # remove this method once the clients are set up
 def handle_request(msg):
     msg_type = msg["message_type"]
-    if msg_type == "buy":
-        if int(process_id) == leader_id:
+    if msg_type == "BUY":
+        if process_id == leader_id:
             proposer.send_prepare(msg)
         else:
             msg["receiver_id"] = leader_id
@@ -141,11 +145,11 @@ def handle_request(msg):
             message_queue.put(msg)
             message_queue_lock.release()
 
-def broadcast_msg(msg):
+def broadcast_msg(message):
     for i in config:
         if i != process_id:
             message_copy = dict(message)
-            message_copy['receiver_id'] = str(i)
+            message_copy['receiver_id'] = i
             message_queue_lock.acquire()
             message_queue.put(message_copy)
             message_queue_lock.release()
@@ -165,6 +169,7 @@ class Proposer:
     log = {}    # { log_index : value }
     majority = math.ceil(len(config)/2.0)
     log_status = {}     ## { 0 : "ballot_number":n, "value":val, "prepare_count":n, "accept_count":n }
+    ballot_status = {}
 
 
     #NOTE: unchosen index will have to be searched for in the log in case of leader failures
@@ -188,15 +193,16 @@ class Proposer:
                 Proposer.ballot_status[log_index]["accept_val"] = accept_val
         else:
             Proposer.ballot_status[log_index] = { "accept_num": accept_num, "accept_val":accept_val }
-
-        if "prepare_count" in Proposer.log_status[log_index]:
-            Proposer.log_status[log_index]["prepare_count"] = 1
-        else:
+        if log_index in Proposer.log_status:
             Proposer.log_status[log_index]["prepare_count"] += 1
+        else:
+            Proposer.log_status[log_index] = {}
+            Proposer.log_status[log_index]["prepare_count"] = 1
         self.check_prepare_status(log_index)
 
-    def check_preare_status(self, log_index):
-        if Proposer.log_status[log_index]["accept_count"] >= Proposer.majority:
+    def check_prepare_status(self, log_index):
+        print "hiii"
+        if Proposer.log_status[log_index]["prepare_count"] >= Proposer.majority:
             value = Proposer.ballot_status[log_index]["accept_val"]
             Proposer.log_status[log_index]["value"] = value
             self.send_accept_msg(value)
@@ -262,7 +268,7 @@ while True:
         number_of_tickets = message.split(":")[1]
         if len(number_of_tickets) > 0:
             number_of_tickets = int(number_of_tickets)
-            formatted_msg = { "message_type": "buy", "number_of_tickets" : number_of_tickets }
+            formatted_msg = { "message_type": "BUY", "number_of_tickets" : number_of_tickets }
             handle_request(formatted_msg)
 
 

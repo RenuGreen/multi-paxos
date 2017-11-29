@@ -18,10 +18,13 @@ leader_id = "1"  #everything is a string (leader_id, process_id, etc.)
 send_channels = {}
 recv_channels = []
 message_queue = Queue.Queue()
+heartbeat_message_queue = Queue.Queue()
 lock=threading.Lock()
 message_queue_lock = threading.Lock()
 request_queue = []
 request_queue_lock = threading.Lock()
+message_id = 0
+heartbeat_queue_lock = threading.Lock()
 
 class Acceptor:
     log = {}
@@ -98,8 +101,11 @@ def send_message():
                 message = message_queue.get()
                 message_queue_lock.release()
                 receiver = message["receiver_id"]
-                send_channels[receiver].sendall(json.dumps(message))
+                if receiver in send_channels.keys():
+                    print 'trying to send', message
+                    send_channels[receiver].sendall(json.dumps(message))
             except:
+                print message
                 print traceback.print_exc()
 
 
@@ -122,6 +128,7 @@ def receive_message():
                             request_queue_lock.release()
                             proposer.send_prepare()
                         else:
+                            # if leaderless, don't send message or start phase 1
                             msg["receiver_id"] = leader_id
                             message_queue_lock.acquire()
                             message_queue.put(msg)
@@ -136,6 +143,10 @@ def receive_message():
                         proposer.receive_ack(msg)
                     elif msg_type == "COMMIT":
                         acceptor.receive_final_value(msg)
+                    elif msg_type == "HEARTBEAT":
+                        heartbeat_queue_lock.acquire()
+                        heartbeat_message_queue.put(msg)
+                        heartbeat_queue_lock.release()
 
             except:
                 time.sleep(1)
@@ -147,9 +158,11 @@ def handle_request(msg):
     if msg_type == "BUY":
         if process_id == leader_id:
             proposer.send_prepare()
-        #     what happens to the value?
+        #     what happens to the input given?
         else:
+        # if leaderless, don't send message or start phase 1
             msg["receiver_id"] = leader_id
+            print 'sending to leader', msg
             message_queue_lock.acquire()
             message_queue.put(msg)
             message_queue_lock.release()
@@ -244,6 +257,36 @@ class Proposer:
         msg = { "message_type": "COMMIT", "ballot_number": (ballot_number, process_id), "log_index": log_index, "value": value, "sender_id": process_id }
         broadcast_msg(msg)
 
+def send_heartbeat():
+    while True:
+        try:
+            if process_id == leader_id:
+                msg = { "message_type": "HEARTBEAT", "sender_id": process_id }
+                broadcast_msg(msg)
+                time.sleep(10)
+        except:
+            print 'send heartbeat stopped'
+
+
+def receive_heartbeat():
+    global leader_id
+    while True:
+        try:
+            if heartbeat_message_queue.qsize() > 0:
+                print 'got heartbeat'
+                heartbeat_queue_lock.acquire()
+                msg = heartbeat_message_queue.get()
+                heartbeat_message_queue.queue.clear()
+                heartbeat_queue_lock.release()
+                leader_id = msg["sender_id"]
+            else:
+                print 'no leader'
+                leader_id = None
+            time.sleep(12)
+        except:
+            print 'rcv heartbeat stopped'
+
+
 
 ################################################################################
 if __name__ == "__main__":
@@ -265,6 +308,10 @@ if __name__ == "__main__":
     # t1.start()
     start_new_thread(send_message, ())
     start_new_thread(receive_message, ())
+    start_new_thread(send_heartbeat, ())
+    if process_id != leader_id:
+        start_new_thread(receive_heartbeat, ())
+
 
     proposer = Proposer()
     acceptor = Acceptor()
@@ -274,9 +321,10 @@ while True:
     message = raw_input("Enter BUY:<no_of_tickets> ")
     if "BUY" in message:
         number_of_tickets = message.split(":")[1]
+        message_id += 1
         if len(number_of_tickets) > 0:
             number_of_tickets = int(number_of_tickets)
-            formatted_msg = { "message_type": "BUY", "number_of_tickets" : number_of_tickets }
+            formatted_msg = { "message_type": "BUY", "number_of_tickets" : number_of_tickets, "message_id" : (message_id, process_id)}
             handle_request(formatted_msg)
 
 

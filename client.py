@@ -53,7 +53,7 @@ class Acceptor:
             Acceptor.manage_log[log_index]['accept_num'] = message['ballot_number'][0]
             Acceptor.manage_log[log_index]['accept_val'] = message['value']
             Acceptor.manage_ballot[log_index]['ballot_number'] = message['ballot_number'][0]
-            message = {"message_type": "ACCEPT-ACCEPT", "ballot_number" : message['ballot_number'][0], "value" : message['value'], "receiver_id" : leader_id, "sender_id": process_id, "log_index" : log_index}
+            message = {"message_type": "ACCEPT-ACCEPT", "ballot_number" : message['ballot_number'], "value" : message['value'], "receiver_id" : leader_id, "sender_id": process_id, "log_index" : log_index}
             message_queue_lock.acquire()
             message_queue.put(message)
             message_queue_lock.release()
@@ -133,20 +133,22 @@ def receive_message():
                             message_queue_lock.acquire()
                             message_queue.put(msg)
                             message_queue_lock.release()
-                    elif msg_type == "PREPARE":
-                        acceptor.receive_prepare(msg)
-                    elif msg_type == "ACCEPT-PREPARE":
-                        proposer.receive_accept_prepare(msg)
-                    elif msg_type == "ACCEPT":
-                        acceptor.receive_accept(msg)
-                    elif msg_type == "ACCEPT-ACCEPT":
-                        proposer.receive_ack(msg)
-                    elif msg_type == "COMMIT":
-                        acceptor.receive_final_value(msg)
-                    elif msg_type == "HEARTBEAT":
-                        heartbeat_queue_lock.acquire()
-                        heartbeat_message_queue.put(msg)
-                        heartbeat_queue_lock.release()
+                    else:
+                        msg["ballot_number"] = tuple(msg["ballot_number"])
+                        if msg_type == "PREPARE":
+                            acceptor.receive_prepare(msg)
+                        elif msg_type == "ACCEPT-PREPARE":
+                            proposer.receive_accept_prepare(msg)
+                        elif msg_type == "ACCEPT":
+                            acceptor.receive_accept(msg)
+                        elif msg_type == "ACCEPT-ACCEPT":
+                            proposer.receive_ack(msg)
+                        elif msg_type == "COMMIT":
+                            acceptor.receive_final_value(msg)
+                        elif msg_type == "HEARTBEAT":
+                            heartbeat_queue_lock.acquire()
+                            heartbeat_message_queue.put(msg)
+                            heartbeat_queue_lock.release()
 
             except:
                 time.sleep(1)
@@ -214,7 +216,7 @@ class Proposer:
                 Proposer.ballot_status[log_index]["accept_num"] = accept_num
                 Proposer.ballot_status[log_index]["accept_val"] = accept_val
         else:
-            Proposer.ballot_status[log_index] = { "accept_num": accept_num, "accept_val":accept_val }
+            Proposer.ballot_status[log_index] = { "accept_num" : accept_num, "accept_val" : accept_val}
         if log_index in Proposer.log_status:
             Proposer.log_status[log_index]["prepare_count"] += 1
         else:
@@ -223,16 +225,17 @@ class Proposer:
         self.check_prepare_status(log_index)
 
     def check_prepare_status(self, log_index):
+        #accept num and val will be null when no conflicts
         if Proposer.log_status[log_index]["prepare_count"] >= Proposer.majority:
             value = Proposer.ballot_status[log_index]["accept_val"]
             Proposer.log_status[log_index]["value"] = value
-            self.send_accept_msg(value, False)
+            self.send_accept_msg({"value": value, "log_index": log_index}, False)
 
     #Added flag when phase 1 runs as well to not increment twice
 
-    def send_accept_msg(self, value, flag = True):
-        msg = { "message_type" : "ACCEPT", "ballot_number" : (Proposer.ballot_number, process_id), "log_index" : Proposer.unchosen_index, "value" : value, "sender_id" : process_id }
-        Proposer.log_status[Proposer.unchosen_index] = { "ballot_number" : Proposer.ballot_number, "value" : value }
+    def send_accept_msg(self, data, flag = True):
+        msg = { "message_type" : "ACCEPT", "ballot_number" : (Proposer.ballot_number, process_id), "log_index" : data["log_index"], "value" : data["value"], "sender_id" : process_id }
+        Proposer.log_status[Proposer.unchosen_index] = { "ballot_number" : Proposer.ballot_number, "value": data["value"] }
         if flag:
             Proposer.ballot_number += 1
             Proposer.unchosen_index += 1

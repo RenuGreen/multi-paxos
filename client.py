@@ -41,23 +41,25 @@ class Acceptor:
 
 
     def receive_accept(self, message):
-
         log_index = message['log_index']
         if log_index not in Acceptor.manage_log:
             Acceptor.manage_log[log_index] = {'accept_num': 0, 'accept_val' : 0}
         if log_index not in Acceptor.manage_ballot:
             Acceptor.manage_ballot[log_index] = {'ballot_number': 0}
-        if message['ballot_number'] >= Acceptor.manage_ballot[log_index]['ballot_num']:
-            Acceptor.manage_log[log_index]['accept_num'] = message['ballot_number']
+        if message['ballot_number'][0] >= Acceptor.manage_ballot[log_index]['ballot_number']:
+            Acceptor.manage_log[log_index]['accept_num'] = message['ballot_number'][0]
             Acceptor.manage_log[log_index]['accept_val'] = message['value']
-            Acceptor.manage_ballot[log_index]['ballot_num'] = message['ballot_number']
-            message = {"message_type": "ACCEPT-ACCEPT", "ballot_number" : message['ballot_number'], "value" : message['value'], "receiver_id" : Acceptor.leader_id, "sender_id": process_id}
-            send_message(message)
+            Acceptor.manage_ballot[log_index]['ballot_number'] = message['ballot_number'][0]
+            message = {"message_type": "ACCEPT-ACCEPT", "ballot_number" : message['ballot_number'][0], "value" : message['value'], "receiver_id" : leader_id, "sender_id": process_id, "log_index" : log_index}
+            message_queue_lock.acquire()
+            message_queue.put(message)
+            message_queue_lock.release()
 
 
-    def receive_final_value(self):
+    def receive_final_value(self, message):
 
         Acceptor.log[message['log_index']] = message["value"]
+        print Acceptor.log[message['log_index']]
 
 
 
@@ -128,6 +130,12 @@ def receive_message():
                         acceptor.receive_prepare(msg)
                     elif msg_type == "ACCEPT-PREPARE":
                         proposer.receive_accept_prepare(msg)
+                    elif msg_type == "ACCEPT":
+                        acceptor.receive_accept(msg)
+                    elif msg_type == "ACCEPT-ACCEPT":
+                        proposer.receive_ack(msg)
+                    elif msg_type == "COMMIT":
+                        acceptor.receive_final_value(msg)
 
             except:
                 time.sleep(1)
@@ -138,7 +146,8 @@ def handle_request(msg):
     msg_type = msg["message_type"]
     if msg_type == "BUY":
         if process_id == leader_id:
-            proposer.send_prepare(msg)
+            proposer.send_prepare()
+        #     what happens to the value?
         else:
             msg["receiver_id"] = leader_id
             message_queue_lock.acquire()
@@ -201,11 +210,10 @@ class Proposer:
         self.check_prepare_status(log_index)
 
     def check_prepare_status(self, log_index):
-        print "hiii"
         if Proposer.log_status[log_index]["prepare_count"] >= Proposer.majority:
             value = Proposer.ballot_status[log_index]["accept_val"]
             Proposer.log_status[log_index]["value"] = value
-            self.send_accept_msg(value)
+            self.send_accept_msg(value, False)
 
     #Added flag when phase 1 runs as well to not increment twice
 
@@ -219,7 +227,7 @@ class Proposer:
 
     def receive_ack(self, msg):
         log_index = msg["log_index"]
-        if Proposer.log_status[log_index]["accept_count"]:
+        if "accept_count" not in Proposer.log_status[log_index]:
             Proposer.log_status[log_index]["accept_count"] = 1
         else:
             Proposer.log_status[log_index]["accept_count"] += 1

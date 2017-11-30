@@ -211,14 +211,13 @@ class Proposer:
         Proposer.increase_indices() # to not start with 0 as accept num and accept val have 0 values
         log_index = Proposer.unchosen_index
         ballot_number = Proposer.ballot_number
-        msg = {"message_type": "PREPARE", "ballot_number": ballot_number, "log_index": log_index, "sender_id": process_id, "message_id": message["message_id"]}
 
         if log_index not in Proposer.log_status:
             Proposer.log_status[log_index] = {"prepare_count": 0, "accept_count": 0}
-        Proposer.log_status[log_index]["ballot_number"] = ballot_number
-        Proposer.log_status[log_index]["value"] = message["number_of_tickets"]
-        Proposer.log_status[log_index]["message_id"] = message["message_id"]
+        Proposer.log_status[log_index].update({"ballot_number": ballot_number, "value": message["number_of_tickets"], "message_id": message["message_id"]})
 
+        msg = {"message_type": "PREPARE", "ballot_number": ballot_number, "log_index": log_index,
+               "sender_id": process_id, "message_id": message["message_id"]}
         broadcast_msg(msg)
 
     def receive_accept_prepare(self, msg):
@@ -229,9 +228,7 @@ class Proposer:
             if log_index in Proposer.ballot_status:
                 old_accept_num = Proposer.ballot_status[log_index]["accept_num"]
                 if accept_num > old_accept_num:
-                    Proposer.ballot_status[log_index]["accept_num"] = accept_num
-                    Proposer.ballot_status[log_index]["accept_val"] = accept_val
-                    Proposer.ballot_status[log_index]["message_id"] = msg["message_id"]
+                    Proposer.ballot_status[log_index].update({"accept_num": accept_num, "accept_val": accept_val, "message_id": msg["message_id"]})
             else:
                 Proposer.ballot_status[log_index] = {"accept_num": accept_num, "accept_val": accept_val, "message_id": msg["message_id"]}
             if log_index in Proposer.log_status:
@@ -253,10 +250,10 @@ class Proposer:
 
             value = Proposer.ballot_status[log_index]["accept_val"] if Proposer.ballot_status[log_index]["accept_val"] > 0 else Proposer.log_status[log_index]["value"]
             message_id = Proposer.ballot_status[log_index]["message_id"] if Proposer.ballot_status[log_index]["message_id"] > (0,0) else Proposer.log_status[log_index]["message_id"]
-            #remove message_id from request queue if present
-            Proposer.log_status[log_index]["value"] = value #final value which will be committed
 
-            #TODO Add message id
+            Proposer.log_status[log_index]["value"] = value #final value which will be committed
+            Proposer.log_status[log_index]["message_id"] = message_id
+
             self.send_accept_msg(log_index, False)
 
     # Added flag when phase 1 runs as well to not increment twice
@@ -292,6 +289,7 @@ class Proposer:
         ballot_number = Proposer.log_status[log_index]["ballot_number"]
         value = Proposer.log_status[log_index]["value"]
         message_id = Proposer.log_status[log_index]["message_id"]
+        # TODO remove message_id from request queue if present
         Proposer.log[log_index] = {"value": value, "message_id": message_id}
         msg = {"message_type": "COMMIT", "ballot_number": ballot_number, "log_index": log_index, "value": value, "sender_id": process_id, "message_id": message_id}
         broadcast_msg(msg)

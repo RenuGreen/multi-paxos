@@ -84,7 +84,7 @@ class Proposer:
     ballot_number = 0
     unchosen_index = 0  # TODO choose uncommitted index
     prepared_msgs = []
-    majority = math.ceil(len(config)/2.0)
+    majority = len(config)/2
     log_status = {}     # { log_index : "ballot_number":n, "value":val, "prepare_count":n, "accept_count":n, message_id}
     ballot_status = {}  # { log_index : "accept_num":n, "accept_val":val} TODO Not needed as separate dict?
 
@@ -127,7 +127,7 @@ class Proposer:
 
     def check_prepare_status(self, log_index):
         #accept num and val will be null when no conflicts
-        if Proposer.log_status[log_index]["prepare_count"] >= Proposer.majority:
+        if Proposer.log_status[log_index]["prepare_count"] == Proposer.majority:
             self.decide_value_to_accept(log_index)
             self.send_accept_msg(log_index)
 
@@ -166,7 +166,7 @@ class Proposer:
         self.check_log_status(log_index)
 
     def check_log_status(self, log_index):
-        if Proposer.log_status[log_index]["accept_count"] >= Proposer.majority:
+        if Proposer.log_status[log_index]["accept_count"] == Proposer.majority:
             self.send_final_accept(log_index)
 
     def send_final_accept(self, log_index):

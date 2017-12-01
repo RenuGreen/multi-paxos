@@ -25,13 +25,13 @@ request_queue = []
 request_queue_lock = threading.Lock()
 message_id = 0
 heartbeat_queue_lock = threading.Lock()
+log = {}    # { log_index : value }
 
 
 class Acceptor:
 
-    log = {}
     manage_log = {}
-    manage_ballot = {}
+    manage_ballot  = {}
 
     def receive_prepare(self, message):
         log_index = message['log_index']
@@ -39,7 +39,7 @@ class Acceptor:
             Acceptor.manage_ballot[log_index] = {'ballot_number': 0}
         if log_index not in Acceptor.manage_log:
             Acceptor.manage_log[log_index] = {'accept_num': 0, 'accept_val': 0, 'message_id': (0, 0)}
-        if message['ballot_number'] >= Acceptor.manage_ballot[log_index]['ballot_number']:
+        if message['ballot_number'] > Acceptor.manage_ballot[log_index]['ballot_number']:
             Acceptor.manage_ballot[log_index] = {'ballot_number': message['ballot_number']}
             message = {"message_type": "ACCEPT-PREPARE", "ballot_number": message['ballot_number'], "accept_num": Acceptor.manage_log[log_index]['accept_num'],
                        "accept_val": Acceptor.manage_log[log_index]['accept_val'], "receiver_id": leader_id, "sender_id": process_id, "log_index": log_index, "message_id": Acceptor.manage_log[log_index]['message_id']}
@@ -66,126 +66,8 @@ class Acceptor:
             print traceback.print_exc()
 
     def receive_final_value(self, message):
-        Acceptor.log[message['log_index']] = {"value": message["value"], "message_id": message["message_id"]}
-        print 'printing log', Acceptor.log
-
-
-def setup_receive_channels(s):
-    while 1:
-        try:
-            conn, addr = s.accept()
-        except:
-            continue
-        recv_channels.append(conn)
-        print 'Connected with ' + addr[0] + ':' + str(addr[1])
-        # what to do after connecting to all clients
-        # should I break?
-
-
-def setup_send_channels():
-    while True:
-        for i in config.keys():
-            if not i == process_id and not i in send_channels.keys():
-                cs = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                host = config[i]["IP"]
-                port = config[i]["Port"]
-                try:
-                    cs.connect((host, port))
-                except:
-                    time.sleep(1)
-                    continue
-                print 'Connected to ' + host + ' on port ' + str(port)
-                send_channels[i] = cs   #add channel to dictionary
-
-
-def send_message():
-    while True:
-        if message_queue.qsize() > 0:
-            try:
-                message_queue_lock.acquire()
-                message = message_queue.get()
-                message_queue_lock.release()
-                receiver = message["receiver_id"]
-                if receiver in send_channels.keys():
-                    print 'trying to send', message
-                    send_channels[receiver].sendall(json.dumps(message))
-            except:
-                print message
-                print traceback.print_exc()
-
-
-def receive_message():
-    while True:
-        for socket in recv_channels:
-            try:
-                message = socket.recv(4096)
-                r = re.split('(\{.*?\})(?= *\{)', message)
-                for msg in r:
-                    if msg == '\n' or msg == '' or msg is None:
-                        continue
-                    msg = json.loads(msg)
-                    print msg
-                    msg_type = msg["message_type"]
-                    msg["message_id"] = tuple(msg["message_id"])
-                    if msg_type == "BUY":
-                        if process_id == leader_id:
-                            request_queue_lock.acquire()
-                            request_queue.append(msg)
-                            request_queue_lock.release()
-                            proposer.send_prepare(msg)
-                        else:
-                            #TODO if leaderless, don't send message or start phase 1
-                            msg["receiver_id"] = leader_id
-                            message_queue_lock.acquire()
-                            message_queue.put(msg)
-                            message_queue_lock.release()
-                    else:
-                        if msg_type == "PREPARE":
-                            acceptor.receive_prepare(msg)
-                        elif msg_type == "ACCEPT-PREPARE":
-                            proposer.receive_accept_prepare(msg)
-                        elif msg_type == "ACCEPT":
-                            acceptor.receive_accept(msg)
-                        elif msg_type == "ACCEPT-ACCEPT":
-                            proposer.receive_ack(msg)
-                        elif msg_type == "COMMIT":
-                            acceptor.receive_final_value(msg)
-                        elif msg_type == "HEARTBEAT":
-                            heartbeat_queue_lock.acquire()
-                            heartbeat_message_queue.put(msg)
-                            heartbeat_queue_lock.release()
-
-            except:
-                #print traceback.print_exc()
-                #print 'in excpetion'
-                time.sleep(1)
-                continue
-
-# remove this method once the clients are set up
-
-def handle_request(msg):
-    msg_type = msg["message_type"]
-    if msg_type == "BUY":
-        if process_id == leader_id:
-            proposer.send_prepare(msg)
-        # what happens to the input given?
-        else:
-        #TODO if leaderless, don't send message or start phase 1
-            msg["receiver_id"] = leader_id
-            print 'sending to leader', msg
-            message_queue_lock.acquire()
-            message_queue.put(msg)
-            message_queue_lock.release()
-
-
-def broadcast_msg(message):
-    for i in config:
-        if i != process_id:
-            message_copy = dict(message)
-            message_copy['receiver_id'] = i
-            message_queue_lock.acquire()
-            message_queue.put(message_copy)
-            message_queue_lock.release()
+        log[message['log_index']] = {"value": message["value"], "message_id": message["message_id"]}
+        print 'printing log', log
 
 
 class Proposer:
@@ -199,8 +81,8 @@ class Proposer:
     # Proposer -> commit
 
     ballot_number = 0
-    unchosen_index = 0
-    log = {}    # { log_index : value }
+    unchosen_index = 0 #TODO choose uncommitted index
+    prepared_msgs = []
     majority = math.ceil(len(config)/2.0)
     log_status = {}     # { log_index : "ballot_number":n, "value":val, "prepare_count":n, "accept_count":n }
     ballot_status = {}  # { log_index : "accept_num":n, "accept_val":val} TODO Not needed as separate dict?
@@ -243,18 +125,26 @@ class Proposer:
         except:
             print traceback.print_exc()
 
-
     def check_prepare_status(self, log_index):
         #accept num and val will be null when no conflicts
         if Proposer.log_status[log_index]["prepare_count"] >= Proposer.majority:
-
-            value = Proposer.ballot_status[log_index]["accept_val"] if Proposer.ballot_status[log_index]["accept_val"] > 0 else Proposer.log_status[log_index]["value"]
-            message_id = Proposer.ballot_status[log_index]["message_id"] if Proposer.ballot_status[log_index]["message_id"] > (0,0) else Proposer.log_status[log_index]["message_id"]
-
-            Proposer.log_status[log_index]["value"] = value #final value which will be committed
-            Proposer.log_status[log_index]["message_id"] = message_id
-
+            self.decide_value_to_accept(log_index)
             self.send_accept_msg(log_index, False)
+
+    def decide_value_to_accept(self, log_index):
+
+        if Proposer.ballot_status[log_index]["message_id"] > (0, 0):
+            value = Proposer.ballot_status[log_index]["accept_val"]
+            message_id = Proposer.ballot_status[log_index]["message_id"]
+            if message_id in proposer.prepared_msgs:
+                proposer.prepared_msgs.remove(message_id)
+        else:
+            value = Proposer.log_status[log_index]["value"]
+            message_id = Proposer.log_status[log_index]["message_id"]
+
+        Proposer.log_status[log_index]["value"] = value  # final value which will be committed
+        Proposer.log_status[log_index]["message_id"] = message_id
+
 
     # Added flag when phase 1 runs as well to not increment twice
     def send_accept_msg(self, log_index, flag = True):
@@ -286,19 +176,170 @@ class Proposer:
             self.send_final_accept(log_index)
 
     def send_final_accept(self, log_index):
-        ballot_number = Proposer.log_status[log_index]["ballot_number"]
-        value = Proposer.log_status[log_index]["value"]
-        message_id = Proposer.log_status[log_index]["message_id"]
-        # TODO remove message_id from request queue if present
-        Proposer.log[log_index] = {"value": value, "message_id": message_id}
-        msg = {"message_type": "COMMIT", "ballot_number": ballot_number, "log_index": log_index, "value": value, "sender_id": process_id, "message_id": message_id}
-        broadcast_msg(msg)
+        try:
+            ballot_number = Proposer.log_status[log_index]["ballot_number"]
+            value = Proposer.log_status[log_index]["value"]
+            message_id = Proposer.log_status[log_index]["message_id"]
+            # TODO remove message_id from request queue if present
+
+            Proposer.remove_committed_message(message_id)
+
+            log[log_index] = {"value": value, "message_id": message_id}
+            msg = {"message_type": "COMMIT", "ballot_number": ballot_number, "log_index": log_index, "value": value, "sender_id": process_id, "message_id": message_id}
+            broadcast_msg(msg)
+        except:
+            print '-----in commit------'
+            print traceback.print_exc()
+
+
+    @staticmethod
+    def remove_committed_message(message_id):
+        request_queue_lock.acquire()
+        delete_index = None
+        for i in range(len(request_queue)):
+            if request_queue[i]["message_id"] == message_id:
+                delete_index = i
+                break
+        if delete_index is not None:
+            del request_queue[delete_index]
+        request_queue_lock.release()
 
     @staticmethod
     def increase_indices():
         Proposer.ballot_number += 1
         Proposer.unchosen_index += 1
 
+
+def setup_receive_channels(s):
+    while 1:
+        try:
+            conn, addr = s.accept()
+        except:
+            continue
+        recv_channels.append(conn)
+        print 'Connected with ' + addr[0] + ':' + str(addr[1])
+        # what to do after connecting to all clients
+        # should I break?
+
+
+def setup_send_channels():
+    while True:
+        for i in config.keys():
+            if not i == process_id and not i in send_channels.keys():
+                cs = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                host = config[i]["IP"]
+                port = config[i]["Port"]
+                try:
+                    cs.connect((host, port))
+                except:
+                    time.sleep(1)
+                    continue
+                print 'Connected to ' + host + ' on port ' + str(port)
+                send_channels[i] = cs   #add channel to dictionary
+
+
+def send_message():
+    while True:
+        if message_queue.qsize() > 0:
+            try:
+                message_queue_lock.acquire()
+                message = message_queue.get()
+                message_queue_lock.release()
+                receiver = message["receiver_id"]
+                if receiver in send_channels.keys():
+                    print 'trying to send', message
+                    send_channels[receiver].sendall(json.dumps(message))
+            except:
+                print 'could not send', message
+                print traceback.print_exc()
+
+
+def receive_message():
+    while True:
+        for socket in recv_channels:
+            try:
+                message = socket.recv(4096)
+                r = re.split('(\{.*?\})(?= *\{)', message)
+                for msg in r:
+                    if msg == '\n' or msg == '' or msg is None:
+                        continue
+                    msg = json.loads(msg)
+                    print msg
+                    msg_type = msg["message_type"]
+                    msg["message_id"] = tuple(msg["message_id"])
+                    if msg_type == "BUY":
+                        if process_id == leader_id:
+                            request_queue_lock.acquire()
+                            request_queue.append(msg)
+                            request_queue_lock.release()
+                        else:
+                            #TODO if leaderless, don't send message or start phase 1
+                            msg["receiver_id"] = leader_id
+                            message_queue_lock.acquire()
+                            message_queue.put(msg)
+                            message_queue_lock.release()
+                    else:
+                        if msg_type == "PREPARE":
+                            acceptor.receive_prepare(msg)
+                        elif msg_type == "ACCEPT-PREPARE":
+                            proposer.receive_accept_prepare(msg)
+                        elif msg_type == "ACCEPT":
+                            acceptor.receive_accept(msg)
+                        elif msg_type == "ACCEPT-ACCEPT":
+                            proposer.receive_ack(msg)
+                        elif msg_type == "COMMIT":
+                            acceptor.receive_final_value(msg)
+                        elif msg_type == "HEARTBEAT":
+                            heartbeat_queue_lock.acquire()
+                            heartbeat_message_queue.put(msg)
+                            heartbeat_queue_lock.release()
+
+            except:
+                #print traceback.print_exc()
+                #print 'in excpetion'
+                time.sleep(1)
+                continue
+
+# remove this method once the clients are set up
+
+
+def handle_request(msg):
+    msg_type = msg["message_type"]
+    if msg_type == "BUY":
+        if process_id == leader_id:
+            proposer.send_prepare(msg) #TODO log into request queue
+        # what happens to the input given?
+        else:
+        #TODO if leaderless, don't send message or start phase 1
+            msg["receiver_id"] = leader_id
+            print 'sending to leader', msg
+            message_queue_lock.acquire()
+            message_queue.put(msg)
+            message_queue_lock.release()
+
+
+def process_request():
+    try:
+        while True:
+            for i in range(len(request_queue)):
+                msg_id = request_queue[i]["message_id"]
+                if msg_id not in proposer.prepared_msgs:
+                    print 'not present-->', msg_id
+                    proposer.prepared_msgs.append(msg_id)
+                    proposer.send_prepare(request_queue[i])
+    except:
+        print "-------logging-------"
+        print traceback.print_exc()
+
+
+def broadcast_msg(message):
+    for i in config:
+        if i != process_id:
+            message_copy = dict(message)
+            message_copy['receiver_id'] = i
+            message_queue_lock.acquire()
+            message_queue.put(message_copy)
+            message_queue_lock.release()
 
 def send_heartbeat():
     while True:
@@ -314,20 +355,21 @@ def send_heartbeat():
 def receive_heartbeat():
     global leader_id
     while True:
-        try:
-            if heartbeat_message_queue.qsize() > 0:
-                print 'got heartbeat'
-                heartbeat_queue_lock.acquire()
-                msg = heartbeat_message_queue.get()
-                heartbeat_message_queue.queue.clear()
-                heartbeat_queue_lock.release()
-                leader_id = msg["sender_id"]
-            else:
-                print 'no leader'
-                leader_id = None
-            time.sleep(12)
-        except:
-            print 'rcv heartbeat stopped'
+        if process_id != leader_id:
+            try:
+                if heartbeat_message_queue.qsize() > 0:
+                    print 'got heartbeat'
+                    heartbeat_queue_lock.acquire()
+                    msg = heartbeat_message_queue.get()
+                    heartbeat_message_queue.queue.clear()
+                    heartbeat_queue_lock.release()
+                    leader_id = msg["sender_id"]
+                else:
+                    print 'no leader'
+                    leader_id = None
+                time.sleep(12)
+            except:
+                print 'rcv heartbeat stopped'
 
 
 ################################################################################
@@ -351,8 +393,8 @@ if __name__ == "__main__":
     start_new_thread(send_message, ())
     start_new_thread(receive_message, ())
     #start_new_thread(send_heartbeat, ())
-    #if process_id != leader_id:
-    #    start_new_thread(receive_heartbeat, ())
+    #start_new_thread(receive_heartbeat, ())
+    start_new_thread(process_request, ())
 
     proposer = Proposer()
     acceptor = Acceptor()

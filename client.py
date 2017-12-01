@@ -25,7 +25,8 @@ request_queue = []
 request_queue_lock = threading.Lock()
 message_id = 0
 heartbeat_queue_lock = threading.Lock()
-log = {}    # { log_index : value }
+log = {}
+highest_ballot_received = 0
 
 
 class Acceptor:
@@ -81,26 +82,30 @@ class Proposer:
     # Proposer -> commit
 
     ballot_number = 0
-    unchosen_index = 0 #TODO choose uncommitted index
+    unchosen_index = 0  # TODO choose uncommitted index
     prepared_msgs = []
     majority = math.ceil(len(config)/2.0)
-    log_status = {}     # { log_index : "ballot_number":n, "value":val, "prepare_count":n, "accept_count":n }
+    log_status = {}     # { log_index : "ballot_number":n, "value":val, "prepare_count":n, "accept_count":n, message_id}
     ballot_status = {}  # { log_index : "accept_num":n, "accept_val":val} TODO Not needed as separate dict?
 
-    #NOTE: unchosen index will have to be searched for in the log in case of leader failures
-
     def send_prepare(self, message):
-        Proposer.increase_indices() # to not start with 0 as accept num and accept val have 0 values
-        log_index = Proposer.unchosen_index
-        ballot_number = Proposer.ballot_number
+        try:
+            #Proposer.get_uncommitted_index_and_ballot() # to not start with 0 as accept num and accept val have 0 values
+            Proposer.increase_indices()
+            log_index = Proposer.unchosen_index
+            ballot_number = Proposer.ballot_number
+            self.set_log_status(log_index, ballot_number, message)
 
+            msg = {"message_type": "PREPARE", "ballot_number": ballot_number, "log_index": log_index,
+                   "sender_id": process_id, "message_id": message["message_id"]}
+            broadcast_msg(msg)
+        except:
+            print traceback.print_exc()
+
+    def set_log_status(self, log_index, ballot_number, message):
         if log_index not in Proposer.log_status:
             Proposer.log_status[log_index] = {"prepare_count": 0, "accept_count": 0}
         Proposer.log_status[log_index].update({"ballot_number": ballot_number, "value": message["number_of_tickets"], "message_id": message["message_id"]})
-
-        msg = {"message_type": "PREPARE", "ballot_number": ballot_number, "log_index": log_index,
-               "sender_id": process_id, "message_id": message["message_id"]}
-        broadcast_msg(msg)
 
     def receive_accept_prepare(self, msg):
         try:
@@ -115,11 +120,6 @@ class Proposer:
                 Proposer.ballot_status[log_index] = {"accept_num": accept_num, "accept_val": accept_val, "message_id": msg["message_id"]}
             if log_index in Proposer.log_status:
                 Proposer.log_status[log_index]["prepare_count"] += 1
-
-            #This should never happen
-            #else:
-            #    Proposer.log_status[log_index] = {}
-            #    Proposer.log_status[log_index]["prepare_count"] = 1
 
             self.check_prepare_status(log_index)
         except:
@@ -145,11 +145,12 @@ class Proposer:
         Proposer.log_status[log_index]["value"] = value  # final value which will be committed
         Proposer.log_status[log_index]["message_id"] = message_id
 
-
     # Added flag when phase 1 runs as well to not increment twice
-    def send_accept_msg(self, log_index, flag = True):
+    def send_accept_msg(self, log_index, flag=True, message={}):
         if flag:
             Proposer.increase_indices()
+            self.set_log_status(self, log_index, Proposer.ballot_number, message)
+
         msg = { "message_type": "ACCEPT", "ballot_number": Proposer.log_status[log_index]["ballot_number"], "log_index": log_index, "value": Proposer.log_status[log_index]["ballot_number"],
                 "message_id": Proposer.log_status[log_index]["message_id"], "sender_id": process_id}
 
@@ -159,17 +160,10 @@ class Proposer:
 
     def receive_ack(self, msg):
         log_index = msg["log_index"]
-
         if log_index in Proposer.log_status:
             Proposer.log_status[log_index]["accept_count"] += 1
 
         self.check_log_status(log_index)
-
-        #this should not happen
-        #if "accept_count" not in Proposer.log_status[log_index]:
-        #    Proposer.log_status[log_index]["accept_count"] = 1
-        #else:
-        #    Proposer.log_status[log_index]["accept_count"] += 1
 
     def check_log_status(self, log_index):
         if Proposer.log_status[log_index]["accept_count"] >= Proposer.majority:
@@ -180,13 +174,12 @@ class Proposer:
             ballot_number = Proposer.log_status[log_index]["ballot_number"]
             value = Proposer.log_status[log_index]["value"]
             message_id = Proposer.log_status[log_index]["message_id"]
-            # TODO remove message_id from request queue if present
-
             Proposer.remove_committed_message(message_id)
-
             log[log_index] = {"value": value, "message_id": message_id}
             msg = {"message_type": "COMMIT", "ballot_number": ballot_number, "log_index": log_index, "value": value, "sender_id": process_id, "message_id": message_id}
             broadcast_msg(msg)
+            Proposer.set_leader_id()
+            #TODO First process to send first commit becomes leader
         except:
             print '-----in commit------'
             print traceback.print_exc()
@@ -205,9 +198,20 @@ class Proposer:
         request_queue_lock.release()
 
     @staticmethod
+    def set_leader_id():
+        global leader_id
+        if leader_id is None:
+            leader_id = process_id
+
+    @staticmethod
     def increase_indices():
         Proposer.ballot_number += 1
         Proposer.unchosen_index += 1
+
+    @staticmethod
+    def get_uncommitted_index_and_ballot():
+        Proposer.unchosen_index = len(log) # makes it start from 0 for now
+        Proposer.ballot_number = highest_ballot_received + 1
 
 
 def setup_receive_channels(s):
@@ -296,7 +300,7 @@ def receive_message():
 
             except:
                 #print traceback.print_exc()
-                #print 'in excpetion'
+                #print 'in exception'
                 time.sleep(1)
                 continue
 
@@ -319,17 +323,17 @@ def handle_request(msg):
 
 
 def process_request():
-    try:
-        while True:
+    while True:
+        try:
             for i in range(len(request_queue)):
                 msg_id = request_queue[i]["message_id"]
                 if msg_id not in proposer.prepared_msgs:
                     print 'not present-->', msg_id
                     proposer.prepared_msgs.append(msg_id)
                     proposer.send_prepare(request_queue[i])
-    except:
-        print "-------logging-------"
-        print traceback.print_exc()
+        except:
+            print "-------logging-------"
+            print traceback.print_exc()
 
 
 def broadcast_msg(message):

@@ -129,7 +129,7 @@ class Proposer:
         #accept num and val will be null when no conflicts
         if Proposer.log_status[log_index]["prepare_count"] >= Proposer.majority:
             self.decide_value_to_accept(log_index)
-            self.send_accept_msg(log_index, False)
+            self.send_accept_msg(log_index)
 
     def decide_value_to_accept(self, log_index):
 
@@ -146,23 +146,23 @@ class Proposer:
         Proposer.log_status[log_index]["message_id"] = message_id
 
     # Added flag when phase 1 runs as well to not increment twice
-    def send_accept_msg(self, log_index, flag=True, message={}):
-        if flag:
-            Proposer.increase_indices()
-            self.set_log_status(self, log_index, Proposer.ballot_number, message)
-
+    def send_accept_msg(self, log_index):
         msg = { "message_type": "ACCEPT", "ballot_number": Proposer.log_status[log_index]["ballot_number"], "log_index": log_index, "value": Proposer.log_status[log_index]["ballot_number"],
                 "message_id": Proposer.log_status[log_index]["message_id"], "sender_id": process_id}
+        broadcast_msg(msg)
 
-        #TODO handle only phase 2 operation
-
+    def send_accept_msg_phase_2(self, message):
+        Proposer.increase_indices()
+        log_index = Proposer.unchosen_index
+        self.set_log_status(log_index, Proposer.ballot_number, message)
+        msg = { "message_type": "ACCEPT", "ballot_number": Proposer.log_status[log_index]["ballot_number"], "log_index": log_index, "value": Proposer.log_status[log_index]["ballot_number"],
+                "message_id": Proposer.log_status[log_index]["message_id"], "sender_id": process_id}
         broadcast_msg(msg)
 
     def receive_ack(self, msg):
         log_index = msg["log_index"]
         if log_index in Proposer.log_status:
             Proposer.log_status[log_index]["accept_count"] += 1
-
         self.check_log_status(log_index)
 
     def check_log_status(self, log_index):
@@ -179,7 +179,6 @@ class Proposer:
             msg = {"message_type": "COMMIT", "ballot_number": ballot_number, "log_index": log_index, "value": value, "sender_id": process_id, "message_id": message_id}
             broadcast_msg(msg)
             Proposer.set_leader_id()
-            #TODO First process to send first commit becomes leader
         except:
             print '-----in commit------'
             print traceback.print_exc()
@@ -311,8 +310,9 @@ def handle_request(msg):
     msg_type = msg["message_type"]
     if msg_type == "BUY":
         if process_id == leader_id:
-            proposer.send_prepare(msg) #TODO log into request queue
-        # what happens to the input given?
+            request_queue_lock.acquire()
+            request_queue.append(msg)
+            request_queue_lock.release()
         else:
         #TODO if leaderless, don't send message or start phase 1
             msg["receiver_id"] = leader_id
@@ -330,7 +330,7 @@ def process_request():
                 if msg_id not in proposer.prepared_msgs:
                     print 'not present-->', msg_id
                     proposer.prepared_msgs.append(msg_id)
-                    proposer.send_prepare(request_queue[i])
+                    proposer.send_accept_msg_phase_2(request_queue[i])
         except:
             print "-------logging-------"
             print traceback.print_exc()

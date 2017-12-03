@@ -32,7 +32,7 @@ highest_ballot_received = 0
 class Acceptor:
 
     manage_log = {}
-    manage_ballot  = {}
+    manage_ballot = {}
 
     def receive_prepare(self, message):
         log_index = message['log_index']
@@ -69,6 +69,26 @@ class Acceptor:
     def receive_final_value(self, message):
         log[message['log_index']] = {"value": message["value"], "message_id": message["message_id"]}
         print 'printing log', log
+
+    def check_log(self, highest_index):
+        try:
+            for i in range(highest_index):
+                if i+1 not in log.keys():
+                    message = {"message_type": "SEND_LOG", "sender_id": process_id, "receiver_id": leader_id}
+                    message_queue_lock.acquire()
+                    message_queue.put(message)
+                    message_queue_lock.release()
+                    break
+        except:
+            print traceback.print_exc()
+
+    def update_log(self, message):
+        updated_log = message["log"]
+        for key in updated_log:
+            int_key = int(key)
+            if int_key not in log:
+                log[int_key] = {'message_id': tuple(updated_log[key]['message_id']), 'value': updated_log[key]['value']}
+        print "printing updated_log", log
 
 
 class Proposer:
@@ -147,7 +167,7 @@ class Proposer:
 
     # Added flag when phase 1 runs as well to not increment twice
     def send_accept_msg(self, log_index):
-        msg = { "message_type": "ACCEPT", "ballot_number": Proposer.log_status[log_index]["ballot_number"], "log_index": log_index, "value": Proposer.log_status[log_index]["ballot_number"],
+        msg = { "message_type": "ACCEPT", "ballot_number": Proposer.log_status[log_index]["ballot_number"], "log_index": log_index, "value": Proposer.log_status[log_index]["value"],
                 "message_id": Proposer.log_status[log_index]["message_id"], "sender_id": process_id}
         broadcast_msg(msg)
 
@@ -155,7 +175,7 @@ class Proposer:
         Proposer.increase_indices()
         log_index = Proposer.unchosen_index
         self.set_log_status(log_index, Proposer.ballot_number, message)
-        msg = { "message_type": "ACCEPT", "ballot_number": Proposer.log_status[log_index]["ballot_number"], "log_index": log_index, "value": Proposer.log_status[log_index]["ballot_number"],
+        msg = {"message_type": "ACCEPT", "ballot_number": Proposer.log_status[log_index]["ballot_number"], "log_index": log_index, "value": Proposer.log_status[log_index]["value"],
                 "message_id": Proposer.log_status[log_index]["message_id"], "sender_id": process_id}
         broadcast_msg(msg)
 
@@ -179,10 +199,21 @@ class Proposer:
             msg = {"message_type": "COMMIT", "ballot_number": ballot_number, "log_index": log_index, "value": value, "sender_id": process_id, "message_id": message_id}
             broadcast_msg(msg)
             Proposer.set_leader_id()
+            print 'printing log', log
         except:
             print '-----in commit------'
             print traceback.print_exc()
 
+    @staticmethod
+    def send_log(message):
+        try:
+            msg = {"message_type": "UPDATE_LOG", "log": log,
+                   "sender_id": process_id, "receiver_id": message["sender_id"]}
+            message_queue_lock.acquire()
+            message_queue.put(msg)
+            message_queue_lock.release()
+        except:
+            print traceback.print_exc()
 
     @staticmethod
     def remove_committed_message(message_id):
@@ -273,31 +304,25 @@ def receive_message():
                     if "message_id" in msg:
                         msg["message_id"] = tuple(msg["message_id"])
                     if msg_type == "BUY":
-                        if process_id == leader_id:
-                            request_queue_lock.acquire()
-                            request_queue.append(msg)
-                            request_queue_lock.release()
-                        else:
-                            #TODO if leaderless, don't send message or start phase 1
-                            msg["receiver_id"] = leader_id
-                            message_queue_lock.acquire()
-                            message_queue.put(msg)
-                            message_queue_lock.release()
-                    else:
-                        if msg_type == "PREPARE":
-                            acceptor.receive_prepare(msg)
-                        elif msg_type == "ACCEPT-PREPARE":
-                            proposer.receive_accept_prepare(msg)
-                        elif msg_type == "ACCEPT":
-                            acceptor.receive_accept(msg)
-                        elif msg_type == "ACCEPT-ACCEPT":
-                            proposer.receive_ack(msg)
-                        elif msg_type == "COMMIT":
-                            acceptor.receive_final_value(msg)
-                        elif msg_type == "HEARTBEAT":
-                            heartbeat_queue_lock.acquire()
-                            heartbeat_message_queue.put(msg)
-                            heartbeat_queue_lock.release()
+                        handle_request(msg)
+                    elif msg_type == "PREPARE":
+                        acceptor.receive_prepare(msg)
+                    elif msg_type == "ACCEPT-PREPARE":
+                        proposer.receive_accept_prepare(msg)
+                    elif msg_type == "ACCEPT":
+                        acceptor.receive_accept(msg)
+                    elif msg_type == "ACCEPT-ACCEPT":
+                        proposer.receive_ack(msg)
+                    elif msg_type == "COMMIT":
+                        acceptor.receive_final_value(msg)
+                    elif msg_type == "SEND_LOG":
+                        proposer.send_log(msg)
+                    elif msg_type == "UPDATE_LOG":
+                        acceptor.update_log(msg)
+                    elif msg_type == "HEARTBEAT":
+                        heartbeat_queue_lock.acquire()
+                        heartbeat_message_queue.put(msg)
+                        heartbeat_queue_lock.release()
 
             except:
                 #print traceback.print_exc()
@@ -305,26 +330,21 @@ def receive_message():
                 time.sleep(1)
                 continue
 
-# remove this method once the clients are set up
-
 
 def handle_request(msg):
-    msg_type = msg["message_type"]
-    if msg_type == "BUY":
-        if process_id == leader_id:
-            request_queue_lock.acquire()
-            request_queue.append(msg)
-            request_queue_lock.release()
+    if process_id == leader_id:
+        request_queue_lock.acquire()
+        request_queue.append(msg)
+        request_queue_lock.release()
+    else:
+        if leader_id is not None:
+            msg["receiver_id"] = leader_id
+            print 'sending to leader', msg
+            message_queue_lock.acquire()
+            message_queue.put(msg)
+            message_queue_lock.release()
         else:
-            #TODO if leaderless, don't send message or start phase 1
-            if leader_id is not None:
-                msg["receiver_id"] = leader_id
-                print 'sending to leader', msg
-                message_queue_lock.acquire()
-                message_queue.put(msg)
-                message_queue_lock.release()
-            else:
-                proposer.send_prepare(msg)
+            proposer.send_prepare(msg)
 
 
 def process_request():
@@ -349,38 +369,48 @@ def broadcast_msg(message):
             message_queue_lock.acquire()
             message_queue.put(message_copy)
             message_queue_lock.release()
+            #if message["message_type"] == "COMMIT":
+            #    time.sleep(3)
 
 def send_heartbeat():
+    c = 0
     while True:
         try:
             if process_id == leader_id:
-                msg = {"message_type": "HEARTBEAT", "sender_id": process_id, "highest_ballot_number": proposer.ballot_number}
+                msg = {"message_type": "HEARTBEAT", "sender_id": process_id, "highest_ballot_number": Proposer.ballot_number, "highest_log_index": (len(log)), "c": c}
                 broadcast_msg(msg)
-                time.sleep(3)
+                time.sleep(5)
+                c += 1
         except:
+            print traceback.print_exc()
             print 'send heartbeat stopped'
 
 
 def receive_heartbeat():
-    time.sleep(5)
+    time.sleep(6)
     global leader_id, highest_ballot_received
     while True:
         if process_id != leader_id:
             try:
                 if heartbeat_message_queue.qsize() > 0:
                     heartbeat_queue_lock.acquire()
+                    while heartbeat_message_queue.qsize() > 1:
+                        heartbeat_message_queue.get()
                     msg = heartbeat_message_queue.get()
                     heartbeat_message_queue.queue.clear()
                     heartbeat_queue_lock.release()
                     leader_id = msg["sender_id"]
                     highest_ballot_received = msg["highest_ballot_number"]
-                    print 'got heartbeat from ', leader_id
+                    highest_index = msg["highest_log_index"]
+                    acceptor.check_log(highest_index)
+                    print 'got heartbeat from with ballot and index and count', leader_id, highest_ballot_received, msg["highest_log_index"], msg["c"]
                 else:
                     print 'no leader'
                     leader_id = None
-                time.sleep(5)
+                time.sleep(7)
             except:
                 print 'rcv heartbeat stopped'
+                print traceback.print_exc()
 
 
 ################################################################################

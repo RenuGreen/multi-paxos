@@ -7,7 +7,7 @@ import Queue
 import traceback, random
 import re
 import logging
-import math
+import tickets
 
 with open("config.json", "r") as configFile:
     config = json.load(configFile)
@@ -68,6 +68,13 @@ class Acceptor:
 
     def receive_final_value(self, message):
         log[message['log_index']] = {"value": message["value"], "message_id": message["message_id"]}
+        # update the tickets available
+        ticket_kiosk.sell_tickets(message["value"])
+        if message["message_id"][1] == process_id:
+            reply_message = {"message_type": "SALE", "receiver_id": "client", "message_id": message['message_id'], "result": "success", "value": message["value"]}
+            message_queue_lock.acquire()
+            message_queue.put(reply_message)
+            message_queue_lock.release()
         print 'printing log', log
 
     def check_log(self, highest_index):
@@ -89,6 +96,19 @@ class Acceptor:
             if int_key not in log:
                 log[int_key] = {'message_id': tuple(updated_log[key]['message_id']), 'value': updated_log[key]['value']}
         print "printing updated_log", log
+
+    def handle_show_msg(self, message):
+        reply_message = { "message_type" : "SHOW", "receiver_id" : "client", "tickets_available" : ticket_kiosk.get_available_tickets(), "log": log , "message_id":message["message_id"]}
+        message_queue_lock.acquire()
+        message_queue.put(reply_message)
+        message_queue_lock.release()
+
+    def handle_sale_failure(self, message):
+        reply_message = {"message_type": "SALE", "receiver_id": "client", "message_id": message["message_id"],"result": "failure", "reason": "tickets not available"}
+        message_queue_lock.acquire()
+        message_queue.put(reply_message)
+        message_queue_lock.release()
+
 
 
 class Proposer:
@@ -198,8 +218,18 @@ class Proposer:
             log[log_index] = {"value": value, "message_id": message_id}
             msg = {"message_type": "COMMIT", "ballot_number": ballot_number, "log_index": log_index, "value": value, "sender_id": process_id, "message_id": message_id}
             broadcast_msg(msg)
+            # update available tickets
+            ticket_kiosk.sell_tickets(msg["value"])
             Proposer.set_leader_id()
             print 'printing log', log
+            # reply to the client
+            if message_id[1] == process_id:
+                reply_message = {"message_type": "SALE", "receiver_id": "client", "message_id": message_id,
+                                 "result": "success", "value": value}
+                message_queue_lock.acquire()
+                message_queue.put(reply_message)
+                message_queue_lock.release()
+
         except:
             print '-----in commit------'
             print traceback.print_exc()
@@ -258,11 +288,21 @@ def setup_receive_channels(s):
 
 def setup_send_channels():
     while True:
-        for i in config.keys():
+        if not "client" in send_channels: #connection to client
+            client_ip = config["client"][process_id]["IP"]
+            client_port = config["client"][process_id]["Port"]
+            try:
+                client_soc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                client_soc.connect((client_ip, client_port))
+                print 'Connected to client ' + client_ip + ' on port ' + str(client_port)
+                send_channels["client"] = client_soc
+            except:
+                pass
+        for i in config["dc"].keys():
             if not i == process_id and not i in send_channels.keys():
                 cs = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                host = config[i]["IP"]
-                port = config[i]["Port"]
+                host = config["dc"][i]["IP"]
+                port = config["dc"][i]["Port"]
                 try:
                     cs.connect((host, port))
                 except:
@@ -323,7 +363,8 @@ def receive_message():
                         heartbeat_queue_lock.acquire()
                         heartbeat_message_queue.put(msg)
                         heartbeat_queue_lock.release()
-
+                    elif msg_type == "SHOW":
+                        acceptor.handle_show_msg(msg)
             except:
                 #print traceback.print_exc()
                 #print 'in exception'
@@ -332,19 +373,22 @@ def receive_message():
 
 
 def handle_request(msg):
-    if process_id == leader_id:
-        request_queue_lock.acquire()
-        request_queue.append(msg)
-        request_queue_lock.release()
-    else:
-        if leader_id is not None:
-            msg["receiver_id"] = leader_id
-            print 'sending to leader', msg
-            message_queue_lock.acquire()
-            message_queue.put(msg)
-            message_queue_lock.release()
+    if msg["number_of_tickets"] <= ticket_kiosk.get_available_tickets():
+        if process_id == leader_id:
+            request_queue_lock.acquire()
+            request_queue.append(msg)
+            request_queue_lock.release()
         else:
-            proposer.send_prepare(msg)
+            if leader_id is not None:
+                msg["receiver_id"] = leader_id
+                print 'sending to leader', msg
+                message_queue_lock.acquire()
+                message_queue.put(msg)
+                message_queue_lock.release()
+            else:
+                proposer.send_prepare(msg)
+    else:
+        acceptor.handle_sale_failure(msg)
 
 
 def process_request():
@@ -362,7 +406,7 @@ def process_request():
 
 
 def broadcast_msg(message):
-    for i in config:
+    for i in config["dc"]:
         if i != process_id:
             message_copy = dict(message)
             message_copy['receiver_id'] = i
@@ -418,8 +462,8 @@ if __name__ == "__main__":
 
     process_id = raw_input("Enter process id: ")
 
-    HOST = config[process_id]["IP"]
-    PORT = config[process_id]["Port"]
+    HOST = config["dc"][process_id]["IP"]
+    PORT = config["dc"][process_id]["Port"]
     print PORT
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -439,16 +483,19 @@ if __name__ == "__main__":
 
     proposer = Proposer()
     acceptor = Acceptor()
+    ticket_kiosk = tickets.TicketKiosk()
 
 
 while True:
-    client_input = raw_input("Enter BUY:<no_of_tickets> ")
-    if "BUY" in client_input:
-        number_of_tickets = client_input.split(":")[1]
-        message_id += 1
-        if len(number_of_tickets) > 0:
-            number_of_tickets = int(number_of_tickets)
-            formatted_msg = {"message_type": "BUY", "number_of_tickets": number_of_tickets, "message_id": (message_id, process_id)}
-            handle_request(formatted_msg)
+    #pass the config msg here?
+    pass
+    # client_input = raw_input("Enter BUY:<no_of_tickets> ")
+    # if "BUY" in client_input:
+    #     number_of_tickets = client_input.split(":")[1]
+    #     message_id += 1
+    #     if len(number_of_tickets) > 0:
+    #         number_of_tickets = int(number_of_tickets)
+    #         formatted_msg = {"message_type": "BUY", "number_of_tickets": number_of_tickets, "message_id": (message_id, process_id)}
+    #         handle_request(formatted_msg)
 
 

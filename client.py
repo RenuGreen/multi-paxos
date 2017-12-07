@@ -69,13 +69,18 @@ class Acceptor:
     def receive_final_value(self, message):
         log[message['log_index']] = {"value": message["value"], "message_id": message["message_id"]}
         # update the tickets available
-        ticket_kiosk.sell_tickets(message["value"])
         if message["message_id"][1] == process_id:
             reply_message = {"message_type": "SALE", "receiver_id": "client", "message_id": message['message_id'], "result": "success", "value": message["value"]}
             message_queue_lock.acquire()
             message_queue.put(reply_message)
             message_queue_lock.release()
         print 'printing log', log
+        if message["value"] == "RECONFIGURE":
+            Proposer.number_of_connections += 1
+            Proposer.majority = Proposer.number_of_connections / 2
+            print "updated majority: ", Proposer.majority
+        else:
+            ticket_kiosk.sell_tickets(message["value"])
 
     def check_log(self, highest_index):
         try:
@@ -124,7 +129,8 @@ class Proposer:
     ballot_number = 0
     unchosen_index = 0  # TODO choose uncommitted index
     prepared_msgs = []
-    majority = len(config)/2
+    number_of_connections = 3
+    majority = number_of_connections/2
     log_status = {}     # { log_index : "ballot_number":n, "value":val, "prepare_count":n, "accept_count":n, message_id}
     ballot_status = {}  # { log_index : "accept_num":n, "accept_val":val} TODO Not needed as separate dict?
 
@@ -145,7 +151,10 @@ class Proposer:
     def set_log_status(self, log_index, ballot_number, message):
         if log_index not in Proposer.log_status:
             Proposer.log_status[log_index] = {"prepare_count": 0, "accept_count": 0}
-        Proposer.log_status[log_index].update({"ballot_number": ballot_number, "value": message["number_of_tickets"], "message_id": message["message_id"]})
+        if message["value"] == "RECONFIGURE":
+            Proposer.log_status[log_index].update({"ballot_number": ballot_number, "value": message["value"],"message_id": message["message_id"]})
+        else:
+            Proposer.log_status[log_index].update({"ballot_number": ballot_number, "value": message["number_of_tickets"], "message_id": message["message_id"]})
 
     def receive_accept_prepare(self, msg):
         try:
@@ -203,6 +212,8 @@ class Proposer:
         log_index = msg["log_index"]
         if log_index in Proposer.log_status:
             Proposer.log_status[log_index]["accept_count"] += 1
+        if msg["value"] == "RECONFIGURE" and msg["log_index"] in log:
+            return
         self.check_log_status(log_index)
 
     def check_log_status(self, log_index):
@@ -218,8 +229,13 @@ class Proposer:
             log[log_index] = {"value": value, "message_id": message_id}
             msg = {"message_type": "COMMIT", "ballot_number": ballot_number, "log_index": log_index, "value": value, "sender_id": process_id, "message_id": message_id}
             broadcast_msg(msg)
-            # update available tickets
-            ticket_kiosk.sell_tickets(msg["value"])
+            if value == "RECONFIGURE":
+                Proposer.number_of_connections += 1
+                Proposer.majority = Proposer.number_of_connections/2
+                print "updated majority: ", Proposer.majority
+            else:
+                # update available tickets
+                ticket_kiosk.sell_tickets(msg["value"])
             Proposer.set_leader_id()
             print 'printing log', log
             # reply to the client
@@ -365,6 +381,11 @@ def receive_message():
                         heartbeat_queue_lock.release()
                     elif msg_type == "SHOW":
                         acceptor.handle_show_msg(msg)
+                    elif msg_type == "RECONFIGURE":
+                        print "reconfig received"
+                        request_queue_lock.acquire()
+                        request_queue.append(msg)
+                        request_queue_lock.release()
             except:
                 #print traceback.print_exc()
                 #print 'in exception'
@@ -488,8 +509,16 @@ if __name__ == "__main__":
 
 while True:
     #pass the config msg here?
-    pass
-    # client_input = raw_input("Enter BUY:<no_of_tickets> ")
+    client_input = raw_input()
+    if "RECONFIGURE" in client_input:
+        formatted_msg = { "message_type": "RECONFIGURE", "message_id": (1, process_id), "value" : "RECONFIGURE", "sender_id" : process_id }
+        if leader_id is not None:
+            print "here"
+            formatted_msg["receiver_id"] = leader_id
+            message_queue_lock.acquire()
+            message_queue.put(formatted_msg)
+            message_queue_lock.release()
+
     # if "BUY" in client_input:
     #     number_of_tickets = client_input.split(":")[1]
     #     message_id += 1

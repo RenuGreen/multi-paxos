@@ -72,7 +72,7 @@ class Acceptor:
             return
         log[message['log_index']] = {"value": message["value"], "message_id": message["message_id"]}
         # update the tickets available
-        if message["message_id"][1] == process_id:
+        if message["message_id"][1] == process_id and message["value"] != "RECONFIGURE":
             reply_message = {"message_type": "SALE", "receiver_id": "client", "message_id": message['message_id'], "result": "success", "value": message["value"]}
             message_queue_lock.acquire()
             message_queue.put(reply_message)

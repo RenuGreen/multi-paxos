@@ -67,6 +67,9 @@ class Acceptor:
             print traceback.print_exc()
 
     def receive_final_value(self, message):
+        if message['log_index'] in log:
+            print 'printing log', log
+            return
         log[message['log_index']] = {"value": message["value"], "message_id": message["message_id"]}
         # update the tickets available
         if message["message_id"][1] == process_id:
@@ -434,8 +437,8 @@ def broadcast_msg(message):
             message_queue_lock.acquire()
             message_queue.put(message_copy)
             message_queue_lock.release()
-            #if message["message_type"] == "COMMIT":
-            #    time.sleep(3)
+            if message["message_type"] == "COMMIT":
+                time.sleep(3)
 
 def send_heartbeat():
     c = 0

@@ -451,12 +451,12 @@ def send_heartbeat():
                 time.sleep(5)
                 c += 1
         except:
-            print traceback.print_exc()
+            #print traceback.print_exc()
             print 'send heartbeat stopped'
 
 
 def receive_heartbeat():
-    time.sleep(6)
+    time.sleep(8)
     global leader_id, highest_ballot_received
     while True:
         if process_id != leader_id:

@@ -66,7 +66,7 @@ def receive_message_from_dc(s):
 with open("config.json", "r") as configFile:
     config = json.load(configFile)
 
-message_id = 0
+message_id = 1
 index = raw_input("enter datacenter id")
 
 client_IP = config["client"][index]["IP"]

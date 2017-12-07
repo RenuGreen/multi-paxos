@@ -78,8 +78,8 @@ class Acceptor:
             message_queue.put(reply_message)
             message_queue_lock.release()
         print 'printing log', log
-        if "RECONFIGURE" in message["value"]:
-            Proposer.number_of_connections = int(message["value"].split(":")[1])
+        if message["value"] == "RECONFIGURE":
+            Proposer.number_of_connections += 1
             Proposer.majority = Proposer.number_of_connections / 2
             print "updated majority: ", Proposer.majority
         else:
@@ -216,7 +216,7 @@ class Proposer:
         log_index = msg["log_index"]
         if log_index in Proposer.log_status:
             Proposer.log_status[log_index]["accept_count"] += 1
-        if "RECONFIGURE" in msg["value"] and msg["log_index"] in log:
+        if msg["value"] == "RECONFIGURE" and msg["log_index"] in log:
             return
         self.check_log_status(log_index)
 
@@ -233,8 +233,8 @@ class Proposer:
             log[log_index] = {"value": value, "message_id": message_id}
             msg = {"message_type": "COMMIT", "ballot_number": ballot_number, "log_index": log_index, "value": value, "sender_id": process_id, "message_id": message_id}
             broadcast_msg(msg)
-            if "RECONFIGURE" in value:
-                Proposer.number_of_connections = int(value.split(":")[1])
+            if value == "RECONFIGURE":
+                Proposer.number_of_connections += 1
                 Proposer.majority = Proposer.number_of_connections/2
                 print "updated majority: ", Proposer.majority
             else:
@@ -515,8 +515,7 @@ while True:
     #pass the config msg here?
     client_input = raw_input()
     if "RECONFIGURE" in client_input:
-        number_of_dc = client_input.split(":")[1]
-        formatted_msg = { "message_type": "RECONFIGURE", "message_id": (1, process_id), "value" : "RECONFIGURE:"+number_of_dc, "sender_id" : process_id }
+        formatted_msg = { "message_type": "RECONFIGURE", "message_id": (1, process_id), "value" : "RECONFIGURE", "sender_id" : process_id }
         if leader_id is not None:
             print "here"
             formatted_msg["receiver_id"] = leader_id

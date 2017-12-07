@@ -102,6 +102,7 @@ class Acceptor:
         for key in updated_log:
             int_key = int(key)
             if int_key not in log:
+                ticket_kiosk.sell_tickets(updated_log[key]['value'])
                 log[int_key] = {'message_id': tuple(updated_log[key]['message_id']), 'value': updated_log[key]['value']}
         print "printing updated_log", log
 
@@ -154,7 +155,7 @@ class Proposer:
     def set_log_status(self, log_index, ballot_number, message):
         if log_index not in Proposer.log_status:
             Proposer.log_status[log_index] = {"prepare_count": 0, "accept_count": 0}
-        if "RECONFIGURE" in message["value"]:
+        if "value" in message:
             Proposer.log_status[log_index].update({"ballot_number": ballot_number, "value": message["value"],"message_id": message["message_id"]})
         else:
             Proposer.log_status[log_index].update({"ballot_number": ballot_number, "value": message["number_of_tickets"], "message_id": message["message_id"]})

@@ -459,7 +459,7 @@ def broadcast_msg(message):
             message_queue.put(message_copy)
             message_queue_lock.release()
             if message["message_type"] == "COMMIT":
-                time.sleep(3)
+                time.sleep(5)
 
 def send_heartbeat():
     c = 0
@@ -468,7 +468,7 @@ def send_heartbeat():
             if process_id == leader_id:
                 msg = {"message_type": "HEARTBEAT", "sender_id": process_id, "highest_ballot_number": Proposer.ballot_number, "highest_log_index": (len(log)), "c": c}
                 broadcast_msg(msg)
-                time.sleep(5)
+                time.sleep(7)
                 c += 1
         except:
             #print traceback.print_exc()
@@ -496,7 +496,7 @@ def receive_heartbeat():
                 else:
                     print 'no leader'
                     leader_id = None
-                time.sleep(7)
+                time.sleep(9)
             except:
                 print 'rcv heartbeat stopped'
                 print traceback.print_exc()

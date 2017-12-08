@@ -351,7 +351,8 @@ def send_message():
                 message_queue_lock.release()
                 receiver = message["receiver_id"]
                 if receiver in send_channels.keys():
-                    print 'trying to send', message
+                    if message["message_type"] != "HEARTBEAT":
+                        print 'trying to send', message
                     send_channels[receiver].sendall(json.dumps(message))
             except:
                 pass
@@ -443,12 +444,13 @@ def process_request():
             for i in range(len(request_queue)):
                 msg_id = request_queue[i]["message_id"]
                 if msg_id not in proposer.prepared_msgs:
-                    print 'not present-->', msg_id
+                    # print 'not present-->', msg_id
                     proposer.prepared_msgs.append(msg_id)
                     proposer.send_accept_msg_phase_2(request_queue[i])
         except:
-            print "-------logging-------"
-            print traceback.print_exc()
+            pass
+            # print "-------logging-------"
+            # print traceback.print_exc()
 
 
 def broadcast_msg(message):
@@ -459,8 +461,8 @@ def broadcast_msg(message):
             message_queue_lock.acquire()
             message_queue.put(message_copy)
             message_queue_lock.release()
-            if message["message_type"] == "COMMIT":
-                time.sleep(5)
+            # if message["message_type"] == "COMMIT":
+                # time.sleep(5)
 
 def send_heartbeat():
     c = 0
@@ -510,7 +512,6 @@ if __name__ == "__main__":
 
     HOST = config["dc"][process_id]["IP"]
     PORT = config["dc"][process_id]["Port"]
-    print PORT
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     #s.setblocking(0)
@@ -538,7 +539,6 @@ while True:
     if "RECONFIGURE" in client_input:
         formatted_msg = { "message_type": "RECONFIGURE", "message_id": (1, process_id), "value" : "RECONFIGURE", "sender_id" : process_id }
         if leader_id is not None:
-            print "here"
             formatted_msg["receiver_id"] = leader_id
             message_queue_lock.acquire()
             message_queue.put(formatted_msg)

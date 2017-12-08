@@ -354,7 +354,8 @@ def send_message():
                     print 'trying to send', message
                     send_channels[receiver].sendall(json.dumps(message))
             except:
-                print 'could not send', message
+                pass
+                # print 'could not send', message
 
 
 def receive_message(socket):
@@ -492,7 +493,7 @@ def receive_heartbeat():
                     highest_ballot_received = msg["highest_ballot_number"]
                     highest_index = msg["highest_log_index"]
                     acceptor.check_log(highest_index)
-                    print 'got heartbeat from with ballot and index and count', leader_id, highest_ballot_received, msg["highest_log_index"], msg["c"]
+                    # print 'got heartbeat from with ballot and index and count', leader_id, highest_ballot_received, msg["highest_log_index"], msg["c"]
                 else:
                     print 'no leader'
                     leader_id = None

@@ -7,7 +7,7 @@ import re, time
 request_queue = {}
 request_queue_lock = threading.Lock()
 send_socket_lock = threading.Lock()
-REQUEST_TIMEOUT = 15
+REQUEST_TIMEOUT = 25
 
 def send_buy_request(message):
     while True:

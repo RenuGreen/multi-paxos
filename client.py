@@ -81,6 +81,7 @@ class Acceptor:
             print "updated majority: ", Proposer.majority
         else:
             ticket_kiosk.sell_tickets(message["value"])
+        print "-----------------------------------------\n"
 
     def check_log(self, highest_index):
         try:
@@ -105,6 +106,7 @@ class Acceptor:
                     log[int_key] = {'message_id': tuple(updated_log[key]['message_id']), 'value': updated_log[key]['value']}
                     self.notify_client(log[int_key])
             print "printing updated_log", log
+            print "-----------------------------------------\n"
         except:
             print traceback.print_exc()
 
@@ -258,6 +260,7 @@ class Proposer:
                 message_queue_lock.acquire()
                 message_queue.put(reply_message)
                 message_queue_lock.release()
+            print "-----------------------------------------\n"
 
         except:
             print '-----in commit------'
@@ -351,8 +354,8 @@ def send_message():
                 message_queue_lock.release()
                 receiver = message["receiver_id"]
                 if receiver in send_channels.keys():
-                    if message["message_type"] != "HEARTBEAT":
-                        print 'trying to send', message
+                    # if message["message_type"] != "HEARTBEAT":
+                        # print 'trying to send', message
                     send_channels[receiver].sendall(json.dumps(message))
             except:
                 pass

@@ -22,12 +22,11 @@ def send_buy_request(message):
 
         time.sleep(REQUEST_TIMEOUT)
         request_queue_lock.acquire()
-        print message_id
         if message_id not in request_queue:
              request_queue_lock.release()
              break
         request_queue_lock.release()
-        print "retry req"
+        print "Client retrying request"
     return
 
 
@@ -52,10 +51,15 @@ def receive_message_from_dc(s):
                 if msg_type == "SHOW":
                     handle_show_reply(msg)
                 if msg_type == "SALE":
-                    print msg
+                    if msg["result"] == "success":
+                        print "Success"
+                        print "Tickets purchased: ", msg["value"]
+                    else:
+                        print "Failure"
+                        print msg["reason"]
                     request_queue_lock.acquire()
                     if msg["message_id"][0] in request_queue:
-                        print "removing from req queue"
+                        # print "removing from req queue"
                         del request_queue[msg["message_id"][0]]
                     request_queue_lock.release()
         except:
@@ -97,9 +101,9 @@ try:
 except:
     print "couldn't connect"
 
-
+print "Enter BUY:<no_of_tickets> or SHOW"
 while True:
-    client_input = raw_input("Enter BUY:<no_of_tickets> or SHOW").strip()
+    client_input = raw_input().strip()
     formatted_msg = {}
     if "BUY" in client_input:
         number_of_tickets = client_input.split(":")[1]

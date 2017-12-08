@@ -300,7 +300,7 @@ class Proposer:
     @staticmethod
     def get_uncommitted_index_and_ballot():
         Proposer.unchosen_index = len(log)+1 # makes it start from 0 for now
-        Proposer.ballot_number = highest_ballot_received + 1
+        Proposer.ballot_number = highest_ballot_received + 3
 
 
 def setup_receive_channels(s):

@@ -73,7 +73,7 @@ client_IP = config["client"][index]["IP"]
 client_port = config["client"][index]["Port"]
 receive_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 receive_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-receive_socket.setblocking(0)
+# receive_socket.setblocking(0)
 receive_socket.bind((client_IP, client_port))
 receive_socket.listen(10)
 
@@ -99,7 +99,7 @@ except:
 
 
 while True:
-    client_input = raw_input("Enter BUY:<no_of_tickets> or SHOW")
+    client_input = raw_input("Enter BUY:<no_of_tickets> or SHOW").rstrip()
     formatted_msg = {}
     if "BUY" in client_input:
         number_of_tickets = client_input.split(":")[1]

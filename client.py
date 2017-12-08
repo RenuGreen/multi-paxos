@@ -68,15 +68,12 @@ class Acceptor:
 
     def receive_final_value(self, message):
         if message['log_index'] in log:
-            print 'printing log', log
+            print 'printing value already in log ', log
+            self.notify_client(message)
             return
         log[message['log_index']] = {"value": message["value"], "message_id": message["message_id"]}
         # update the tickets available
-        if message["message_id"][1] == process_id and message["value"] != "RECONFIGURE":
-            reply_message = {"message_type": "SALE", "receiver_id": "client", "message_id": message['message_id'], "result": "success", "value": message["value"]}
-            message_queue_lock.acquire()
-            message_queue.put(reply_message)
-            message_queue_lock.release()
+        self.notify_client(message)
         print 'printing log', log
         if message["value"] == "RECONFIGURE":
             Proposer.number_of_connections += 1
@@ -104,7 +101,15 @@ class Acceptor:
             if int_key not in log:
                 ticket_kiosk.sell_tickets(updated_log[key]['value'])
                 log[int_key] = {'message_id': tuple(updated_log[key]['message_id']), 'value': updated_log[key]['value']}
+        self.notify_client(message)
         print "printing updated_log", log
+
+    def notify_client(self, message):
+        if message["message_id"][1] == process_id and message["value"] != "RECONFIGURE":
+            reply_message = {"message_type": "SALE", "receiver_id": "client", "message_id": message['message_id'], "result": "success", "value": message["value"]}
+            message_queue_lock.acquire()
+            message_queue.put(reply_message)
+            message_queue_lock.release()
 
     def handle_show_msg(self, message):
         reply_message = { "message_type" : "SHOW", "receiver_id" : "client", "tickets_available" : ticket_kiosk.get_available_tickets(), "log": log , "message_id":message["message_id"]}
@@ -298,6 +303,7 @@ def setup_receive_channels(s):
     while 1:
         try:
             conn, addr = s.accept()
+            start_new_thread(receive_message, (conn,))
         except:
             continue
         recv_channels.append(conn)
@@ -345,60 +351,62 @@ def send_message():
                     send_channels[receiver].sendall(json.dumps(message))
             except:
                 print 'could not send', message
-                print traceback.print_exc()
 
 
-def receive_message():
+def receive_message(socket):
     while True:
-        for socket in recv_channels:
-            try:
-                message = socket.recv(4096)
-                r = re.split('(\{.*?\})(?= *\{)', message)
-                for msg in r:
-                    if msg == '\n' or msg == '' or msg is None:
-                        continue
-                    msg = json.loads(msg)
-                    msg_type = msg["message_type"]
-                    if msg_type != "HEARTBEAT":
-                        print msg
-                    if "message_id" in msg:
-                        msg["message_id"] = tuple(msg["message_id"])
-                    if msg_type == "BUY":
-                        handle_request(msg)
-                    elif msg_type == "PREPARE":
-                        acceptor.receive_prepare(msg)
-                    elif msg_type == "ACCEPT-PREPARE":
-                        proposer.receive_accept_prepare(msg)
-                    elif msg_type == "ACCEPT":
-                        acceptor.receive_accept(msg)
-                    elif msg_type == "ACCEPT-ACCEPT":
-                        proposer.receive_ack(msg)
-                    elif msg_type == "COMMIT":
-                        acceptor.receive_final_value(msg)
-                    elif msg_type == "SEND_LOG":
-                        proposer.send_log(msg)
-                    elif msg_type == "UPDATE_LOG":
-                        acceptor.update_log(msg)
-                    elif msg_type == "HEARTBEAT":
-                        heartbeat_queue_lock.acquire()
-                        heartbeat_message_queue.put(msg)
-                        heartbeat_queue_lock.release()
-                    elif msg_type == "SHOW":
-                        acceptor.handle_show_msg(msg)
-                    elif msg_type == "RECONFIGURE":
-                        print "reconfig received"
-                        request_queue_lock.acquire()
-                        request_queue.append(msg)
-                        request_queue_lock.release()
-            except:
-                #print traceback.print_exc()
-                #print 'in exception'
-                time.sleep(1)
-                continue
+        try:
+            message = socket.recv(4096)
+            r = re.split('(\{.*?\})(?= *\{)', message)
+            for msg in r:
+                if msg == '\n' or msg == '' or msg is None:
+                    continue
+                msg = json.loads(msg)
+                msg_type = msg["message_type"]
+                if msg_type != "HEARTBEAT":
+                    print msg
+                if "message_id" in msg:
+                    msg["message_id"] = tuple(msg["message_id"])
+                if msg_type == "BUY":
+                    handle_request(msg)
+                elif msg_type == "PREPARE":
+                    acceptor.receive_prepare(msg)
+                elif msg_type == "ACCEPT-PREPARE":
+                    proposer.receive_accept_prepare(msg)
+                elif msg_type == "ACCEPT":
+                    acceptor.receive_accept(msg)
+                elif msg_type == "ACCEPT-ACCEPT":
+                    proposer.receive_ack(msg)
+                elif msg_type == "COMMIT":
+                    acceptor.receive_final_value(msg)
+                elif msg_type == "SEND_LOG":
+                    proposer.send_log(msg)
+                elif msg_type == "UPDATE_LOG":
+                    acceptor.update_log(msg)
+                elif msg_type == "HEARTBEAT":
+                    heartbeat_queue_lock.acquire()
+                    heartbeat_message_queue.put(msg)
+                    heartbeat_queue_lock.release()
+                elif msg_type == "SHOW":
+                    acceptor.handle_show_msg(msg)
+                elif msg_type == "RECONFIGURE":
+                    print "reconfig received"
+                    request_queue_lock.acquire()
+                    request_queue.append(msg)
+                    request_queue_lock.release()
+        except:
+            #print traceback.print_exc()
+            #print 'in exception'
+            time.sleep(1)
+            continue
 
 
 def handle_request(msg):
     if msg["number_of_tickets"] <= ticket_kiosk.get_available_tickets():
+        if check_if_present_in_log(msg['message_id']):
+            print 'returned withput anything'
+            acceptor.notify_client(msg)
+            return
         if process_id == leader_id:
             request_queue_lock.acquire()
             request_queue.append(msg)
@@ -414,6 +422,14 @@ def handle_request(msg):
                 proposer.send_prepare(msg)
     else:
         acceptor.handle_sale_failure(msg)
+
+
+def check_if_present_in_log(message_id):
+    for i in range(1,len(log)):
+        if i in log and message_id == log[i]["message_id"]:
+            print "matched ", message_id, log[i]["message_id"]
+            return True
+    return False
 
 
 def process_request():
@@ -462,12 +478,12 @@ def receive_heartbeat():
         if process_id != leader_id:
             try:
                 if heartbeat_message_queue.qsize() > 0:
-                    heartbeat_queue_lock.acquire()
+                    #heartbeat_queue_lock.acquire()
                     while heartbeat_message_queue.qsize() > 1:
                         heartbeat_message_queue.get()
                     msg = heartbeat_message_queue.get()
-                    heartbeat_message_queue.queue.clear()
-                    heartbeat_queue_lock.release()
+                    #heartbeat_message_queue.queue.clear()
+                    #heartbeat_queue_lock.release()
                     leader_id = msg["sender_id"]
                     highest_ballot_received = msg["highest_ballot_number"]
                     highest_index = msg["highest_log_index"]
@@ -492,7 +508,7 @@ if __name__ == "__main__":
     print PORT
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    s.setblocking(0)
+    #s.setblocking(0)
     s.bind((HOST, PORT))
     s.listen(10)
 
@@ -501,7 +517,7 @@ if __name__ == "__main__":
     # t1 = threading.Thread(target=setup_send_channels, args=())
     # t1.start()
     start_new_thread(send_message, ())
-    start_new_thread(receive_message, ())
+    #start_new_thread(receive_message, ())
     start_new_thread(send_heartbeat, ())
     start_new_thread(receive_heartbeat, ())
     start_new_thread(process_request, ())

@@ -95,17 +95,21 @@ class Acceptor:
             print traceback.print_exc()
 
     def update_log(self, message):
-        updated_log = message["log"]
-        for key in updated_log:
-            int_key = int(key)
-            if int_key not in log:
-                ticket_kiosk.sell_tickets(updated_log[key]['value'])
-                log[int_key] = {'message_id': tuple(updated_log[key]['message_id']), 'value': updated_log[key]['value']}
-        self.notify_client(message)
-        print "printing updated_log", log
+        try:
+            updated_log = message["log"]
+            for key in updated_log:
+                int_key = int(key)
+                if int_key not in log:
+                    if updated_log[key]['value'] != "RECONFIGURE":
+                        ticket_kiosk.sell_tickets(updated_log[key]['value'])
+                    log[int_key] = {'message_id': tuple(updated_log[key]['message_id']), 'value': updated_log[key]['value']}
+                    self.notify_client(log[int_key])
+            print "printing updated_log", log
+        except:
+            print traceback.print_exc()
 
     def notify_client(self, message):
-        if message["message_id"][1] == process_id and message["value"] != "RECONFIGURE":
+        if ("message_id" in message) and message["message_id"][1] == process_id and message["value"] != "RECONFIGURE":
             reply_message = {"message_type": "SALE", "receiver_id": "client", "message_id": message['message_id'], "result": "success", "value": message["value"]}
             message_queue_lock.acquire()
             message_queue.put(reply_message)

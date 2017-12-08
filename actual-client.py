@@ -99,7 +99,7 @@ except:
 
 
 while True:
-    client_input = raw_input("Enter BUY:<no_of_tickets> or SHOW").rstrip()
+    client_input = raw_input("Enter BUY:<no_of_tickets> or SHOW").strip()
     formatted_msg = {}
     if "BUY" in client_input:
         number_of_tickets = client_input.split(":")[1]
